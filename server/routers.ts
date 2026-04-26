@@ -3,6 +3,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
+import { sql, eq, gte, desc } from "drizzle-orm";
+import { issues, users } from "../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import {
   getIssues,
@@ -21,6 +23,7 @@ import {
   unhideIssue,
   getHiddenIssues,
   upsertUser,
+  getDb,
 } from "./db";
 import { createAndSendOtp, verifyOtp } from "./services/otpService";
 import { analyzeIssueRisk, shouldMarkAsCritical } from "./services/aiRiskService";
@@ -398,6 +401,105 @@ export const appRouter = router({
             message: "Failed to update risk level",
           });
         }
+      }),
+
+    // Get dashboard stats
+    getDashboardStats: adminProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Database not available",
+        });
+      }
+
+      const allIssues = await db.select().from(issues);
+      
+      const stats = {
+        total: allIssues.length,
+        solved: allIssues.filter(i => i.status === "resolved").length,
+        inProgress: allIssues.filter(i => i.status === "in-progress").length,
+        pending: allIssues.filter(i => i.status === "open").length,
+      };
+
+      // Group by address for Bar chart
+      const densityMap = allIssues.reduce((acc, issue) => {
+        const area = issue.address.split(",")[0] || "Unknown"; // Basic grouping
+        acc[area] = (acc[area] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const areaDensity = Object.entries(densityMap)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      // Pie chart for status breakdown
+      const statusBreakdown = [
+        { name: "Open", value: stats.pending, fill: "#ef4444" },
+        { name: "In Progress", value: stats.inProgress, fill: "#eab308" },
+        { name: "Resolved", value: stats.solved, fill: "#22c55e" },
+      ];
+
+      // Recent Feed
+      const recentFeed = await db
+        .select({
+          id: issues.id,
+          title: issues.title,
+          category: issues.category,
+          status: issues.status,
+          createdAt: issues.createdAt,
+          reporterName: users.name,
+        })
+        .from(issues)
+        .leftJoin(users, eq(issues.userId, users.id))
+        .orderBy(desc(issues.createdAt))
+        .limit(20);
+
+      return {
+        stats,
+        areaDensity,
+        statusBreakdown,
+        recentFeed,
+      };
+    }),
+
+    // Get export data
+    getExportData: adminProcedure
+      .input(z.object({ filter: z.enum(["daily", "monthly"]) }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Database not available",
+          });
+        }
+
+        const now = new Date();
+        const pastDate = new Date();
+        if (input.filter === "daily") {
+          pastDate.setDate(now.getDate() - 1);
+        } else {
+          pastDate.setMonth(now.getMonth() - 1);
+        }
+
+        const data = await db
+          .select({
+            reporterName: users.name,
+            contactInfo: users.email,
+            issueCategory: issues.category,
+            description: issues.description,
+            status: issues.status,
+            locationCoordinates: sql<string>`CONCAT(${issues.latitude}, ', ', ${issues.longitude})`,
+            timestamp: issues.createdAt,
+          })
+          .from(issues)
+          .leftJoin(users, eq(issues.userId, users.id))
+          .where(gte(issues.createdAt, pastDate))
+          .orderBy(desc(issues.createdAt));
+
+        return data;
       }),
   }),
 

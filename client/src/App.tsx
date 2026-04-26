@@ -21,7 +21,7 @@ function Router() {
       <Route path={"/submit"} component={SubmitIssue} />
       <Route path={"/issues/:id"} component={IssueDetail} />
       <Route path={"/dashboard"} component={Dashboard} />
-      <Route path={"/admin"} component={AdminDashboard} />
+      <Route path={"/admin/dashboard"} component={AdminDashboard} />
       <Route path={"/signup"} component={SignUp} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}

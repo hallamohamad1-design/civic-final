@@ -2,24 +2,43 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Users, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { 
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
+import { RefreshCw, Download, FileSpreadsheet, MapPin } from "lucide-react";
 import { useLocation } from "wouter";
+import { trpc } from "@/lib/trpc";
+import { exportToExcel } from "@/lib/exportUtils";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { format } from "date-fns";
 
 /**
  * Admin Dashboard - Restricted to admin users only
- * Displays management tools for issues, users, and system statistics
+ * Displays live stats, charts, recent issues feed, and export functionality
  */
 export default function AdminDashboard() {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
 
+  const utils = trpc.useUtils();
+  
+  // Queries
+  const { data: dashboardData, isLoading: isDashboardLoading, refetch } = trpc.admin.getDashboardStats.useQuery(undefined, {
+    enabled: !!user && user.role === "admin",
+  });
+
+  const exportQuery = trpc.admin.getExportData.useQuery;
+
   // Redirect non-admins to home
-  if (!loading && (!user || user.role !== "admin")) {
+  if (!authLoading && (!user || user.role !== "admin")) {
     setLocation("/");
     return null;
   }
 
-  if (loading) {
+  if (authLoading || isDashboardLoading || !dashboardData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -27,200 +46,180 @@ export default function AdminDashboard() {
     );
   }
 
+  const handleExport = async (filter: "daily" | "monthly") => {
+    try {
+      const data = await utils.client.admin.getExportData.query({ filter });
+      exportToExcel(data, `CivicPulse_Report_${filter}_${format(new Date(), "yyyy-MM-dd")}`);
+    } catch (error) {
+      console.error("Export failed", error);
+    }
+  };
+
+  const { stats, areaDensity, statusBreakdown, recentFeed } = dashboardData;
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto py-8 px-4">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-foreground mb-2">Admin Dashboard</h1>
-          <p className="text-muted-foreground">Manage issues, users, and system settings</p>
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-foreground mb-2">Admin Dashboard</h1>
+            <p className="text-muted-foreground">Live tracking of system issues and reports</p>
+          </div>
+          
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => refetch()} className="gap-2">
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="gap-2">
+                  <Download className="w-4 h-4" />
+                  Download Report
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport("daily")} className="cursor-pointer gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-green-600" /> Daily Report
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("monthly")} className="cursor-pointer gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-green-600" /> Monthly Report
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card>
+        {/* Live Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <Card className="border-l-4 border-l-blue-500 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Issues</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">1,234</div>
-              <p className="text-xs text-muted-foreground mt-1">+12% from last month</p>
+              <div className="text-3xl font-bold">{stats.total}</div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-l-4 border-l-green-500 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Active Users</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Solved</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">856</div>
-              <p className="text-xs text-muted-foreground mt-1">+5% from last month</p>
+              <div className="text-3xl font-bold text-green-600">{stats.solved}</div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-l-4 border-l-yellow-500 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Critical Issues</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">In-Progress</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-red-600">42</div>
-              <p className="text-xs text-muted-foreground mt-1">Require attention</p>
+              <div className="text-3xl font-bold text-yellow-600">{stats.inProgress}</div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-l-4 border-l-red-500 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Resolved</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-green-600">89%</div>
-              <p className="text-xs text-muted-foreground mt-1">Resolution rate</p>
+              <div className="text-3xl font-bold text-red-600">{stats.pending}</div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Management Sections */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Critical Issues Section */}
-          <Card>
+        {/* Charts Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Bar Chart - Area Density */}
+          <Card className="shadow-sm">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
-                Critical Issues
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <MapPin className="w-5 h-5 text-primary" />
+                Report Density by Location
               </CardTitle>
-              <CardDescription>Issues marked as critical and hidden from public view</CardDescription>
+              <CardDescription>Areas with the highest concentration of reports</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div>
-                      <p className="font-medium text-sm">Critical Issue #{i}</p>
-                      <p className="text-xs text-muted-foreground">Location: Downtown Area</p>
-                    </div>
-                    <Badge variant="destructive">Critical</Badge>
-                  </div>
-                ))}
-              </div>
-              <Button className="w-full mt-4" variant="outline">
-                View All Critical Issues
-              </Button>
+            <CardContent className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={areaDensity} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis fontSize={12} tickLine={false} axisLine={false} />
+                  <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                  <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
 
-          {/* Hidden Issues Section */}
-          <Card>
+          {/* Pie Chart - Status Breakdown */}
+          <Card className="shadow-sm">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <EyeOff className="w-5 h-5" />
-                Hidden Issues
-              </CardTitle>
-              <CardDescription>Issues hidden from public view for security or sensitivity</CardDescription>
+              <CardTitle className="text-lg">Issue Status Breakdown</CardTitle>
+              <CardDescription>Percentage distribution of current statuses</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div>
-                      <p className="font-medium text-sm">Hidden Issue #{i}</p>
-                      <p className="text-xs text-muted-foreground">Risk Level: High</p>
-                    </div>
-                    <Button size="sm" variant="ghost">
-                      <Eye className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <Button className="w-full mt-4" variant="outline">
-                Manage Hidden Issues
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* User Management Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="w-5 h-5" />
-                User Management
-              </CardTitle>
-              <CardDescription>Manage user accounts and permissions</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span>Total Users</span>
-                  <span className="font-medium">1,234</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Active This Month</span>
-                  <span className="font-medium">856</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Admins</span>
-                  <span className="font-medium">12</span>
-                </div>
-              </div>
-              <Button className="w-full" variant="outline">
-                Manage Users
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Risk Detection Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5" />
-                AI Risk Detection
-              </CardTitle>
-              <CardDescription>AI-powered issue risk assessment</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span>Critical Risk Issues</span>
-                  <span className="font-medium text-red-600">42</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>High Risk Issues</span>
-                  <span className="font-medium text-orange-600">128</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Medium Risk Issues</span>
-                  <span className="font-medium text-yellow-600">356</span>
-                </div>
-              </div>
-              <Button className="w-full" variant="outline">
-                View Risk Analysis
-              </Button>
+            <CardContent className="h-[300px] flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={statusBreakdown}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={70}
+                    outerRadius={100}
+                    paddingAngle={5}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {statusBreakdown.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                </PieChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
         </div>
 
-        {/* System Settings Section */}
-        <Card className="mt-6">
+        {/* Recent Feed Section */}
+        <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle>System Settings</CardTitle>
-            <CardDescription>Configure system-wide settings and features</CardDescription>
+            <CardTitle className="text-xl">Real-time Feed</CardTitle>
+            <CardDescription>Latest reported issues across the city</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button variant="outline" className="justify-start">
-                Email Configuration
-              </Button>
-              <Button variant="outline" className="justify-start">
-                AI Settings
-              </Button>
-              <Button variant="outline" className="justify-start">
-                Notification Rules
-              </Button>
-              <Button variant="outline" className="justify-start">
-                System Logs
-              </Button>
+            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+              {recentFeed.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">No recent issues found.</div>
+              ) : (
+                recentFeed.map((issue) => (
+                  <div key={issue.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-xl hover:bg-slate-50 transition-colors">
+                    <div className="mb-3 sm:mb-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-semibold text-base">{issue.title}</h4>
+                        <Badge variant="outline" className="text-xs bg-slate-100">{issue.category}</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Reported by <span className="font-medium text-slate-700">{issue.reporterName || "Anonymous"}</span> on {format(new Date(issue.createdAt), "MMM d, yyyy 'at' h:mm a")}
+                      </p>
+                    </div>
+                    <div>
+                      {issue.status === "open" && <Badge variant="destructive" className="px-3 py-1">Pending</Badge>}
+                      {issue.status === "in-progress" && <Badge className="bg-yellow-500 hover:bg-yellow-600 px-3 py-1">In Progress</Badge>}
+                      {issue.status === "resolved" && <Badge className="bg-green-500 hover:bg-green-600 px-3 py-1">Solved</Badge>}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
+
       </div>
     </div>
   );

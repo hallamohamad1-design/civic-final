@@ -5,12 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Mail, CheckCircle2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 
 type SignUpStep = "email" | "otp" | "success";
 
 export default function SignUp() {
   const [, navigate] = useLocation();
+  const { refresh } = useAuth();
   const [step, setStep] = useState<SignUpStep>("email");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
@@ -68,8 +70,17 @@ export default function SignUp() {
       if (result.success) {
         toast.success("Email verified! You can now sign in.");
         setStep("success");
+        
+        // Refresh user session and determine redirect path
+        const sessionInfo = await refresh();
+        const user = sessionInfo.data;
+        
         setTimeout(() => {
-          navigate("/");
+          if (user?.role === "admin") {
+            navigate("/admin/dashboard");
+          } else {
+            navigate("/");
+          }
         }, 2000);
       } else {
         toast.error(result.error || "Invalid OTP. Please try again.");
