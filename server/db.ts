@@ -75,6 +75,33 @@ export async function getDb() {
         const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM civic_issues_v2");
         const issuesColDetails = (issuesColumns as any[]);
 
+        // ONE-TIME DATA MIGRATION: Copy from old 'issues' table if it exists
+        try {
+          const [oldTableCheck]: any = await _pool.query("SHOW TABLES LIKE 'issues'");
+          if (oldTableCheck.length > 0) {
+            console.log("[Database] Legacy 'issues' table found. Checking for data to migrate...");
+            const [oldData]: any = await _pool.query("SELECT * FROM issues");
+            if (oldData.length > 0) {
+              console.log(`[Database] Migrating ${oldData.length} records to civic_issues_v2...`);
+              for (const row of oldData) {
+                // Check if already exists in new table to avoid duplicates
+                const [exists]: any = await _pool.query("SELECT id FROM civic_issues_v2 WHERE id = ?", [row.id]);
+                if (exists.length === 0) {
+                  const cols = Object.keys(row).join(", ");
+                  const placeholders = Object.keys(row).map(() => "?").join(", ");
+                  const vals = Object.values(row);
+                  await _pool.query(`INSERT INTO civic_issues_v2 (${cols}) VALUES (${placeholders})`, vals);
+                }
+              }
+              console.log("[Database] Migration completed successfully.");
+              // Optional: rename old table to keep as backup
+              await _pool.query("RENAME TABLE issues TO issues_backup_" + Date.now());
+            }
+          }
+        } catch (migrationError) {
+          console.error("[Database] Migration failed (likely already done or tables mismatch):", migrationError);
+        }
+
         // Update imageUrl to LONGTEXT
         const imageUrlCol = issuesColDetails.find(c => c.Field === 'imageUrl');
         if (imageUrlCol && !imageUrlCol.Type.includes('longtext')) {
