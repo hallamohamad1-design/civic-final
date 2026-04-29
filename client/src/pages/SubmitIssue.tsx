@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, AlertCircle, ArrowLeft, Plus } from "lucide-react";
+import { MapPin, AlertCircle, ArrowLeft, Plus, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { MapView } from "@/components/Map";
 import { useAuth } from "@/_core/hooks/useAuth";
