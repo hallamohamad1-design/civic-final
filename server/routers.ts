@@ -359,6 +359,9 @@ export const appRouter = router({
     upvote: protectedProcedure
       .input(z.number())
       .mutation(async ({ input, ctx }) => {
+        const issue = await getIssueById(input);
+        if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+        
         const hasVoted = await hasUserVoted(ctx.user.id, input);
         if (hasVoted) throw new TRPCError({ code: "BAD_REQUEST", message: "Already voted" });
         return await addUserVote(ctx.user.id, input);
