@@ -29,7 +29,7 @@ export default function SignIn() {
         password 
       });
       
-      if (result.success) {
+      if (result.success && result.user) {
         toast.success("Welcome back!");
         // Redirect based on user role
         if (result.user.role === "admin") {

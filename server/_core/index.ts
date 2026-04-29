@@ -8,6 +8,7 @@ import { registerUploadRoutes } from "../upload";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import rateLimit from "express-rate-limit";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -43,6 +44,22 @@ async function startServer() {
   registerOAuthRoutes(app);
   // File uploads
   registerUploadRoutes(app);
+
+  // Security: Rate Limiting for Auth Endpoints (Brute Force Protection)
+  // Limits each IP to 15 authentication attempts every 15 minutes
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 15, 
+    message: { error: { message: "Too many attempts from this IP, please try again after 15 minutes." } },
+  });
+
+  app.use("/api/trpc", (req, res, next) => {
+    // Apply rate limiter only if the request is targeting an auth procedure
+    if (req.path.includes("auth.")) {
+      return authLimiter(req, res, next);
+    }
+    next();
+  });
   // tRPC API
   app.use(
     "/api/trpc",
@@ -52,7 +69,7 @@ async function startServer() {
     })
   );
   // development mode uses Vite, production mode uses static files
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.NODE_ENV !== "production") {
     await setupVite(app, server);
   } else {
     serveStatic(app);

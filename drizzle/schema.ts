@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, longtext } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -33,7 +33,7 @@ export type InsertUser = typeof users.$inferInsert;
  * Issues table for civic issue reporting.
  * Stores community-reported infrastructure and civic issues with location data.
  */
-export const issues = mysqlTable("issues", {
+export const issues = mysqlTable("civic_issues_v2", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull().references(() => users.id),
   title: varchar("title", { length: 255 }).notNull(),
@@ -43,11 +43,12 @@ export const issues = mysqlTable("issues", {
   severity: mysqlEnum("severity", ["low", "medium", "high"]).default("medium").notNull(),
   riskLevel: mysqlEnum("riskLevel", ["low", "medium", "high", "critical"]).default("medium").notNull(),
   isHidden: int("isHidden").default(0).notNull(),
-  address: varchar("address", { length: 255 }).notNull(),
+  address: varchar("address", { length: 512 }).notNull(),
   latitude: varchar("latitude", { length: 64 }).notNull(),
   longitude: varchar("longitude", { length: 64 }).notNull(),
-  imageUrl: text("imageUrl"),
+  imageUrl: longtext("imageUrl"),
   upvotes: int("upvotes").default(0).notNull(),
+  resolutionRating: int("resolutionRating"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -86,4 +87,18 @@ export const userVotes = mysqlTable("user_votes", {
 export type UserVote = typeof userVotes.$inferSelect;
 export type InsertUserVote = typeof userVotes.$inferInsert;
 
+/**
+ * OTP codes table for email-based authentication.
+ * Stores one-time passwords with expiration times for secure login/signup.
+ */
+export const otpCodes = mysqlTable("otp_codes", {
+  id: int("id").autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull(),
+  code: varchar("code", { length: 6 }).notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  isUsed: int("isUsed").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
 
+export type OtpCode = typeof otpCodes.$inferSelect;
+export type InsertOtpCode = typeof otpCodes.$inferInsert;

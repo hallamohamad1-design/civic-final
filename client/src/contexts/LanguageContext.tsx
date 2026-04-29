@@ -4,7 +4,7 @@ import { translations } from "@/i18n/translations";
 interface LanguageContextType {
   language: string;
   setLanguage: (lang: string) => void;
-  t: (key: string) => string;
+  t: (key: string, defaultValue?: string) => string;
   isRTL: boolean;
 }
 
@@ -27,8 +27,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     setLangState(lang);
   }, []);
 
-  const t = useCallback((key: string): string => {
-    return translations[language]?.[key] || translations["en"]?.[key] || key;
+  const t = useCallback((key: string, defaultValue?: string): string => {
+    return translations[language]?.[key] || translations["en"]?.[key] || defaultValue || key;
   }, [language]);
 
   return (

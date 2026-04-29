@@ -10,6 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 export default function Settings() {
   const { user, loading: authLoading } = useAuth();
@@ -17,10 +18,12 @@ export default function Settings() {
   const { language: currentLang, setLanguage: applyLanguage, t } = useLanguage();
   const [language, setLanguage] = useState(currentLang);
   const [theme, setTheme] = useState(currentTheme);
+  const { permission, requestPermission } = usePushNotifications();
   const [notifications, setNotifications] = useState({
     statusChanges: true,
     newComments: true,
-    emailDigest: true
+    emailDigest: true,
+    browserPush: permission === 'granted'
   });
 
   const updateSettings = trpc.auth.updateSettings.useMutation({
@@ -180,6 +183,23 @@ export default function Settings() {
                   <Switch 
                     checked={notifications.emailDigest} 
                     onCheckedChange={(val) => setNotifications({...notifications, emailDigest: val})} 
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-base dark:text-white">Browser Push Notifications</Label>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Receive desktop alerts when you are away</p>
+                  </div>
+                  <Switch 
+                    checked={notifications.browserPush} 
+                    onCheckedChange={async (val) => {
+                      if (val && permission !== 'granted') {
+                        const granted = await requestPermission();
+                        if (granted) setNotifications({...notifications, browserPush: true});
+                      } else {
+                        setNotifications({...notifications, browserPush: val});
+                      }
+                    }} 
                   />
                 </div>
               </CardContent>

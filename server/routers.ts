@@ -25,13 +25,19 @@ import {
   updateUserSettings,
   getUserByEmail,
   getDb,
+  rateIssueResolution,
 } from "./db";
 import { issues, users } from "../drizzle/schema";
 import { eq, sql, and, gte } from "drizzle-orm";
 import { hashPassword, comparePasswords } from "./_core/password";
-import { analyzeIssueRisk, shouldMarkAsCritical } from "./services/aiRiskService";
+import { 
+  analyzeIssueRisk, 
+  shouldMarkAsCritical,
+  detectDuplicateIssue
+} from "./services/aiRiskService";
 import { sdk } from "./_core/sdk";
 import { ONE_YEAR_MS } from "@shared/const";
+import { createAndSendOtp, verifyOtp } from "./services/otpService";
 
 // Admin procedure - requires admin role
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -107,6 +113,27 @@ export const appRouter = router({
         return { success: true, user };
       }),
 
+    sendOtp: publicProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const normalizedEmail = input.email.trim().toLowerCase();
+        return await createAndSendOtp(normalizedEmail);
+      }),
+
+    verifyOtp: publicProcedure
+      .input(z.object({ email: z.string().email(), code: z.string().length(6) }))
+      .mutation(async ({ input }) => {
+        const normalizedEmail = input.email.trim().toLowerCase();
+        const result = await verifyOtp(normalizedEmail, input.code);
+        if (!result.success) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: result.error || "Invalid OTP",
+          });
+        }
+        return { success: true };
+      }),
+
     login: publicProcedure
       .input(z.object({ 
         email: z.string().email(), 
@@ -150,8 +177,8 @@ export const appRouter = router({
              throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to ensure admin user exists" });
            }
 
-           const sessionToken = await sdk.createSessionToken(adminUser.openId, {
-             name: adminUser.name,
+           const sessionToken = await sdk.createSessionToken(adminUser!.openId, {
+             name: adminUser!.name || undefined,
              expiresInMs: ONE_YEAR_MS,
            });
 
@@ -183,7 +210,7 @@ export const appRouter = router({
         }
 
         const sessionToken = await sdk.createSessionToken(user.openId, {
-          name: user.name,
+          name: user.name || undefined,
           expiresInMs: ONE_YEAR_MS,
         });
 
@@ -226,15 +253,37 @@ export const appRouter = router({
         description: z.string().min(1),
         category: z.string().min(1).max(64),
         severity: z.enum(["low", "medium", "high"]),
-        address: z.string().min(1).max(255),
+        address: z.string().min(1).max(512),
         latitude: z.string().min(1).max(64),
         longitude: z.string().min(1).max(64),
         imageUrl: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         try {
-          const riskAnalysis = await analyzeIssueRisk(input.title, input.description, input.category, input.severity);
-          const isCritical = await shouldMarkAsCritical(input.title, input.description, input.category, riskAnalysis.riskLevel);
+          // AI Duplicate Detection with Graceful Fallback
+          let riskLevel: "low" | "medium" | "high" | "critical" = "medium";
+          let isHidden = 0;
+
+          try {
+            const recentIssues = await getIssues(20, 0); // Get recent 20 issues for comparison
+            const duplicateAnalysis = await detectDuplicateIssue(input.title, input.description, input.category, recentIssues);
+            
+            if (duplicateAnalysis.isDuplicate) {
+              throw new TRPCError({ 
+                code: "CONFLICT", 
+                message: `This issue appears to be a duplicate of an existing report (ID: ${duplicateAnalysis.duplicateOfId || 'unknown'}). AI Reasoning: ${duplicateAnalysis.reasoning}` 
+              });
+            }
+
+            const riskAnalysis = await analyzeIssueRisk(input.title, input.description, input.category, input.severity);
+            riskLevel = riskAnalysis.riskLevel;
+            const isCritical = await shouldMarkAsCritical(input.title, input.description, input.category, riskLevel);
+            isHidden = isCritical ? 1 : 0;
+          } catch (aiError: any) {
+            console.error("[AI] Analysis failed, proceeding with defaults:", aiError);
+            if (aiError instanceof TRPCError) throw aiError;
+            // Otherwise, keep default riskLevel and isHidden
+          }
 
           return await createIssue({
             userId: ctx.user.id,
@@ -246,14 +295,22 @@ export const appRouter = router({
             latitude: input.latitude,
             longitude: input.longitude,
             imageUrl: input.imageUrl,
-            riskLevel: riskAnalysis.riskLevel,
-            isHidden: isCritical ? 1 : 0,
-            status: "open",
-            upvotes: 0,
+            riskLevel: riskLevel,
+            isHidden: isHidden,
           });
-        } catch (error) {
+        } catch (error: any) {
           console.error("Failed to create issue:", error);
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to create issue" });
+          if (error instanceof TRPCError) throw error;
+          let errorMessage = error.message || 'Unknown error';
+          // Sanitize: remove large Base64 strings if present in the error message
+          if (errorMessage.length > 500) {
+            errorMessage = errorMessage.substring(0, 500) + "... (truncated)";
+          }
+          
+          throw new TRPCError({ 
+            code: "INTERNAL_SERVER_ERROR", 
+            message: `Failed to create issue: ${errorMessage}` 
+          });
         }
       }),
 
@@ -284,6 +341,21 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    rateResolution: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        rating: z.number().min(1).max(5)
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const issue = await getIssueById(input.id);
+        if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+        if (issue.userId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Only the reporter can rate the resolution" });
+        if (issue.status !== "resolved") throw new TRPCError({ code: "BAD_REQUEST", message: "Can only rate resolved issues" });
+        if (issue.resolutionRating !== null) throw new TRPCError({ code: "BAD_REQUEST", message: "Issue is already rated" });
+        
+        return await rateIssueResolution(input.id, input.rating);
+      }),
+
     upvote: protectedProcedure
       .input(z.number())
       .mutation(async ({ input, ctx }) => {
@@ -312,6 +384,11 @@ export const appRouter = router({
     updateRiskLevel: adminProcedure
       .input(z.object({ issueId: z.number(), riskLevel: z.enum(["low", "medium", "high", "critical"]) }))
       .mutation(async ({ input }) => await updateIssueRiskLevel(input.issueId, input.riskLevel)),
+
+    listAll: adminProcedure
+      .query(async () => {
+        return await getAdminAllIssues();
+      }),
 
     getStats: adminProcedure.query(async () => {
       const db = await getDb();
@@ -379,6 +456,58 @@ export const appRouter = router({
     analyzeIssue: protectedProcedure
       .input(z.object({ title: z.string(), description: z.string(), category: z.string(), severity: z.string() }))
       .mutation(async ({ input }) => await analyzeIssueRisk(input.title, input.description, input.category, input.severity)),
+  }),
+  maps: router({
+    reverseGeocode: publicProcedure
+      .input(z.object({ lat: z.number(), lng: z.number() }))
+      .query(async ({ input }) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+        try {
+          // Use geocode.maps.co as a free, more reliable alternative to official Nominatim
+          const response = await fetch(
+            `https://geocode.maps.co/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
+            {
+              signal: controller.signal,
+            }
+          );
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) throw new Error(`Geocoding service returned ${response.status}`);
+          const data = await response.json();
+          return { address: data.display_name || "Unknown Location" };
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          console.error("[Geocoding Error]", error.name === 'AbortError' ? 'Timeout' : error.message);
+          return { address: "Location identified by coordinates (Service busy)" };
+        }
+      }),
+    forwardGeocode: publicProcedure
+      .input(z.object({ query: z.string() }))
+      .query(async ({ input }) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch(
+            `https://geocode.maps.co/search?q=${encodeURIComponent(input.query)}`,
+            { signal: controller.signal }
+          );
+          clearTimeout(timeoutId);
+          if (!response.ok) throw new Error("Search service unavailable");
+          const data = await response.json();
+          return data.map((item: any) => ({
+            display_name: item.display_name,
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+          }));
+        } catch (error) {
+          clearTimeout(timeoutId);
+          console.error("[Forward Geocoding Error]", error);
+          return [];
+        }
+      }),
   }),
 });
 

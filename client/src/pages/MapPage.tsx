@@ -2,19 +2,22 @@ import React, { useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Filter, Layers, PlusCircle } from "lucide-react";
+import { Search, Filter, Layers, PlusCircle, Map as MapIcon } from "lucide-react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import IssueCard from "@/components/IssueCard";
 import { MapView } from "@/components/Map";
 import type { Issue } from "@shared/types";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export default function MapPage() {
   const { data: issues = [] } = trpc.issues.list.useQuery({});
+  const { t } = useLanguage();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "in-progress" | "resolved">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   const filteredIssues = issues.filter((issue) => {
     const matchesSearch =
@@ -62,7 +65,7 @@ export default function MapPage() {
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
             <Input
-              placeholder="Search location..."
+              placeholder={t("map.search", "Search location...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 rounded-full bg-slate-50 border-none focus-visible:ring-2"
@@ -74,17 +77,17 @@ export default function MapPage() {
               onChange={(e) => setStatusFilter(e.target.value as any)}
               className="flex-1 px-3 py-2 text-xs font-bold rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
             >
-              <option value="all">All Status</option>
-              <option value="open">Open</option>
-              <option value="in-progress">In Progress</option>
-              <option value="resolved">Resolved</option>
+              <option value="all">{t("map.allStatus", "All Status")}</option>
+              <option value="open">{t("dash.open")}</option>
+              <option value="in-progress">{t("dash.inProgress")}</option>
+              <option value="resolved">{t("dash.resolved")}</option>
             </select>
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
               className="flex-1 px-3 py-2 text-xs font-bold rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
             >
-              <option value="all">All Categories</option>
+              <option value="all">{t("map.allCategories", "All Categories")}</option>
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
                   {cat}
@@ -92,11 +95,25 @@ export default function MapPage() {
               ))}
             </select>
           </div>
+          
+          {/* Heat Map Toggle */}
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MapIcon className="h-4 w-4 text-orange-500" />
+              <span className="text-sm font-bold text-slate-700">Issue Heat Map</span>
+            </div>
+            <button
+              onClick={() => setShowHeatmap(!showHeatmap)}
+              className={`w-12 h-6 rounded-full transition-colors relative flex items-center px-1 ${showHeatmap ? 'bg-orange-500' : 'bg-slate-200'}`}
+            >
+              <div className={`w-4 h-4 rounded-full bg-white transition-transform ${showHeatmap ? 'translate-x-6' : 'translate-x-0'}`} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1">
-            Nearby Issues ({filteredIssues.length})
+            {t("map.nearby", "Nearby Issues")} ({filteredIssues.length})
           </h3>
           {filteredIssues.length > 0 ? (
             filteredIssues.map((issue) => (
@@ -110,7 +127,7 @@ export default function MapPage() {
             ))
           ) : (
             <div className="text-center py-8">
-              <p className="text-slate-500 text-sm">No issues found</p>
+              <p className="text-slate-500 text-sm">{t("dash.noIssuesTitle")}</p>
             </div>
           )}
         </div>
@@ -119,7 +136,7 @@ export default function MapPage() {
           <Link href="/submit">
             <Button className="w-full gap-2 rounded-full font-bold shadow-lg shadow-primary/20">
               <PlusCircle className="h-4 w-4" />
-              Report Issue Here
+              {t("dash.reportNew")}
             </Button>
           </Link>
         </div>
@@ -129,11 +146,12 @@ export default function MapPage() {
       <div className="flex-1 relative">
         <MapView
           className="w-full h-full"
-          initialCenter={filteredIssues.length > 0 ? { lat: parseFloat(filteredIssues[0].latitude), lng: parseFloat(filteredIssues[0].longitude) } : { lat: 40.7128, lng: -74.0060 }}
+          initialCenter={filteredIssues.length > 0 ? { lat: parseFloat(filteredIssues[0].latitude), lng: parseFloat(filteredIssues[0].longitude) } : { lat: 30.0444, lng: 31.2357 }}
           initialZoom={14}
           onMapReady={handleMapReady}
           issues={filteredIssues}
           onIssueClick={setSelectedIssue}
+          showHeatmap={showHeatmap}
         />
 
         {/* Issue Info Popup */}
@@ -143,7 +161,7 @@ export default function MapPage() {
             <p className="text-sm text-slate-600 mb-3 line-clamp-2">{selectedIssue.description}</p>
             <Link href={`/issues/${selectedIssue.id}`}>
               <Button size="sm" className="w-full rounded-full">
-                View Details
+                {t("dash.view")}
               </Button>
             </Link>
           </div>

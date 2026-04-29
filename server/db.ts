@@ -1,7 +1,7 @@
 import { eq, sql, and, lt, desc } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, issues, InsertIssue, issueImages, userVotes } from "../drizzle/schema";
+import { InsertUser, users, issues, InsertIssue, issueImages, userVotes, otpCodes } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -12,27 +12,22 @@ export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
       const dbUrl = process.env.DATABASE_URL.trim();
-      const url = new URL(dbUrl);
       
-      const config: mysql.PoolOptions = {
-        host: url.hostname,
-        user: url.username,
-        password: url.password,
-        database: url.pathname.substring(1).split('?')[0] || undefined,
-        port: parseInt(url.port) || 3306,
-        ssl: (dbUrl.includes("tidbcloud.com") || dbUrl.includes("ssl")) ? {
-          rejectUnauthorized: true
-        } : undefined,
+      // Use mysql.createPool directly with the connection string if possible, 
+      // or provide a more robust parsing logic.
+      _pool = mysql.createPool({
+        uri: dbUrl,
         waitForConnections: true,
         connectionLimit: 10,
         maxIdle: 10,
         idleTimeout: 60000,
         queueLimit: 0,
         enableKeepAlive: true,
-        keepAliveInitialDelay: 0
-      };
-
-      _pool = mysql.createPool(config);
+        keepAliveInitialDelay: 0,
+        ssl: (dbUrl.includes("tidbcloud.com") || dbUrl.includes("ssl")) ? {
+          rejectUnauthorized: true
+        } : undefined,
+      });
       
       // Handle pool errors to prevent app crashes
       (_pool as any).on('error', (err: any) => {
@@ -49,11 +44,71 @@ export async function getDb() {
         new Promise((_, reject) => setTimeout(() => reject(new Error("Connection timeout")), 5000))
       ]);
       
-      console.log(`[Database] Connected to ${url.hostname} successfully.`);
+      console.log(`[Database] Connected to MySQL successfully.`);
 
-      // AUTO-MIGRATION CHECK: Add missing columns if they don't exist
+      // AUTO-MIGRATION CHECK: Add missing columns or update lengths if they don't exist
       try {
         console.log("[Database] Running auto-migration check...");
+        // Ensure the new table exists with the correct structure
+        await _pool.query(`
+          CREATE TABLE IF NOT EXISTS civic_issues_v2 (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            userId INT NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            category VARCHAR(64) NOT NULL,
+            status ENUM('open', 'in-progress', 'resolved') DEFAULT 'open' NOT NULL,
+            severity ENUM('low', 'medium', 'high') DEFAULT 'medium' NOT NULL,
+            riskLevel ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium' NOT NULL,
+            isHidden INT DEFAULT 0 NOT NULL,
+            address VARCHAR(512) NOT NULL,
+            latitude VARCHAR(64) NOT NULL,
+            longitude VARCHAR(64) NOT NULL,
+            imageUrl LONGTEXT,
+            upvotes INT DEFAULT 0 NOT NULL,
+            resolutionRating INT DEFAULT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL
+          )
+        `);
+
+        const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM civic_issues_v2");
+        const issuesColDetails = (issuesColumns as any[]);
+
+        // ONE-TIME DATA MIGRATION: Copy from old 'issues' table if it exists
+        try {
+          const [oldTableCheck]: any = await _pool.query("SHOW TABLES LIKE 'issues'");
+          if (oldTableCheck.length > 0) {
+            console.log("[Database] Legacy 'issues' table found. Checking for data to migrate...");
+            const [oldData]: any = await _pool.query("SELECT * FROM issues");
+            if (oldData.length > 0) {
+              console.log(`[Database] Migrating ${oldData.length} records to civic_issues_v2...`);
+              for (const row of oldData) {
+                // Check if already exists in new table to avoid duplicates
+                const [exists]: any = await _pool.query("SELECT id FROM civic_issues_v2 WHERE id = ?", [row.id]);
+                if (exists.length === 0) {
+                  const cols = Object.keys(row).join(", ");
+                  const placeholders = Object.keys(row).map(() => "?").join(", ");
+                  const vals = Object.values(row);
+                  await _pool.query(`INSERT INTO civic_issues_v2 (${cols}) VALUES (${placeholders})`, vals);
+                }
+              }
+              console.log("[Database] Migration completed successfully.");
+              // Optional: rename old table to keep as backup
+              await _pool.query("RENAME TABLE issues TO issues_backup_" + Date.now());
+            }
+          }
+        } catch (migrationError) {
+          console.error("[Database] Migration failed (likely already done or tables mismatch):", migrationError);
+        }
+
+        // Update imageUrl to LONGTEXT
+        const imageUrlCol = issuesColDetails.find(c => c.Field === 'imageUrl');
+        if (imageUrlCol && !imageUrlCol.Type.includes('longtext')) {
+          console.log("[Database] Updating issues.imageUrl to LONGTEXT...");
+          await _pool.query("ALTER TABLE issues MODIFY COLUMN imageUrl LONGTEXT");
+        }
+
         const [usersColumns] = await _pool.query("SHOW COLUMNS FROM users");
         const userColNames = (usersColumns as any[]).map(c => c.Field);
         
@@ -76,7 +131,6 @@ export async function getDb() {
           console.log("[Database] Added 'password' column.");
         }
 
-        const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM issues");
         const issueColNames = (issuesColumns as any[]).map(c => c.Field);
         if (!issueColNames.includes("riskLevel")) {
           await _pool.query("ALTER TABLE issues ADD COLUMN riskLevel ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium' NOT NULL");
@@ -86,6 +140,28 @@ export async function getDb() {
           await _pool.query("ALTER TABLE issues ADD COLUMN isHidden INT DEFAULT 0 NOT NULL");
           console.log("[Database] Added 'isHidden' column to issues.");
         }
+        if (!issueColNames.includes("resolutionRating")) {
+          await _pool.query("ALTER TABLE issues ADD COLUMN resolutionRating INT DEFAULT NULL");
+          console.log("[Database] Added 'resolutionRating' column to issues.");
+        }
+        if (!issueColNames.includes("upvotes")) {
+          await _pool.query("ALTER TABLE issues ADD COLUMN upvotes INT DEFAULT 0 NOT NULL");
+          console.log("[Database] Added 'upvotes' column to issues.");
+        }
+
+        // Create otp_codes table if it doesn't exist
+        await _pool.query(`
+          CREATE TABLE IF NOT EXISTS otp_codes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            email VARCHAR(320) NOT NULL,
+            code VARCHAR(6) NOT NULL,
+            expiresAt TIMESTAMP NOT NULL,
+            isUsed INT DEFAULT 0 NOT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+          )
+        `);
+        console.log("[Database] Ensured 'otp_codes' table exists.");
+
       } catch (migrateError) {
         console.error("[Database] Auto-migration check failed:", migrateError);
       }
@@ -277,13 +353,26 @@ export async function getIssueCount() {
 export async function createIssue(data: InsertIssue) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  
   try {
-    const result = await db.insert(issues).values(data);
+    // Check if user exists to avoid foreign key violation
+    const user = await db.select().from(users).where(eq(users.id, data.userId)).limit(1);
+    if (user.length === 0) {
+      throw new Error(`User with ID ${data.userId} not found in database. Please try logging out and in again.`);
+    }
+
+    // Clean data: remove empty strings for optional fields to let defaults work
+    const cleanData: any = { ...data };
+    if (!cleanData.imageUrl) delete cleanData.imageUrl;
+
+    const result = await db.insert(issues).values(cleanData);
     const insertedId = result[0].insertId;
     return await getIssueById(Number(insertedId));
-  } catch (error) {
+  } catch (error: any) {
     console.error("[Database] Failed to create issue:", error);
-    throw error;
+    // Extract a more useful message from the MySQL error if available
+    const mysqlError = error.sqlMessage || error.message || JSON.stringify(error);
+    throw new Error(`Database Error: ${mysqlError}`);
   }
 }
 
@@ -295,6 +384,18 @@ export async function updateIssue(id: number, data: Partial<InsertIssue>) {
     return await getIssueById(id);
   } catch (error) {
     console.error("[Database] Failed to update issue:", error);
+    throw error;
+  }
+}
+
+export async function rateIssueResolution(id: number, rating: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  try {
+    await db.update(issues).set({ resolutionRating: rating }).where(eq(issues.id, id));
+    return await getIssueById(id);
+  } catch (error) {
+    console.error("[Database] Failed to rate issue:", error);
     throw error;
   }
 }
@@ -428,5 +529,99 @@ export async function getHiddenIssues(limit: number = 50, offset: number = 0) {
   } catch (error) {
     console.error("[Database] Failed to get hidden issues:", error);
     return [];
+  }
+}
+
+// OTP query helpers
+
+export async function deleteOldOtps(email: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  try {
+    await db.delete(otpCodes).where(eq(otpCodes.email, email));
+  } catch (error) {
+    console.error("[Database] Failed to delete old OTPs:", error);
+  }
+}
+
+export async function createOtpCode(email: string, code: string, expiresAt: Date) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  try {
+    // 1. Delete any existing OTPs for this email first (as per the user's smart suggestion)
+    await deleteOldOtps(email);
+
+    // 2. Insert the new OTP
+    const result = await db.insert(otpCodes).values({ email, code, expiresAt });
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to create OTP code:", error);
+    throw error;
+  }
+}
+
+export async function verifyOtpCode(email: string, code: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot verify OTP: database not available");
+    return false;
+  }
+
+  try {
+    // Debug logging
+    console.log(`[DB] Verifying OTP for: ${email}, Code: ${code}`);
+
+    const result = await db
+      .select()
+      .from(otpCodes)
+      .where(and(eq(otpCodes.email, email), eq(otpCodes.code, code)))
+      .limit(1);
+    
+    if (result.length === 0) {
+      console.log(`[OTP VERIFY] No record found for ${email} with code ${code}`);
+      return false;
+    }
+    
+    const otpRecord = result[0];
+    
+    if (otpRecord.isUsed) {
+      console.log(`[OTP VERIFY] Code ${code} for ${email} has already been used.`);
+      return false;
+    }
+
+    // Robust expiration check
+    const expiryTime = new Date(otpRecord.expiresAt).getTime();
+    const currentTime = Date.now();
+    
+    // Debug logging
+    console.log(`[DB OTP] Expiry: ${new Date(expiryTime).toISOString()}`);
+    console.log(`[DB OTP] Now: ${new Date(currentTime).toISOString()}`);
+    
+    // Give a 1-minute buffer for safety
+    if (currentTime > (expiryTime + 60000)) {
+      console.log(`[OTP VERIFY] Expired. Current: ${new Date(currentTime).toISOString()}, Expiry: ${new Date(expiryTime).toISOString()}`);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to verify OTP:", error);
+    return false;
+  }
+}
+
+export async function markOtpAsUsed(email: string, code: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  try {
+    await db
+      .update(otpCodes)
+      .set({ isUsed: 1 })
+      .where(and(eq(otpCodes.email, email), eq(otpCodes.code, code)));
+  } catch (error) {
+    console.error("[Database] Failed to mark OTP as used:", error);
+    throw error;
   }
 }
