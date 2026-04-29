@@ -474,6 +474,31 @@ export const appRouter = router({
           return { address: "Location identified by coordinates (Service busy)" };
         }
       }),
+    forwardGeocode: publicProcedure
+      .input(z.object({ query: z.string() }))
+      .query(async ({ input }) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch(
+            `https://geocode.maps.co/search?q=${encodeURIComponent(input.query)}`,
+            { signal: controller.signal }
+          );
+          clearTimeout(timeoutId);
+          if (!response.ok) throw new Error("Search service unavailable");
+          const data = await response.json();
+          return data.map((item: any) => ({
+            display_name: item.display_name,
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+          }));
+        } catch (error) {
+          clearTimeout(timeoutId);
+          console.error("[Forward Geocoding Error]", error);
+          return [];
+        }
+      }),
   }),
 });
 
