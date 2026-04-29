@@ -61,6 +61,7 @@ export default function SubmitIssue() {
   };
   const utils = trpc.useUtils();
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
 
   const [imageUrl, setImageUrl] = useState("");
   const [isUploading, setIsUploading] = useState(false);
@@ -263,11 +264,22 @@ export default function SubmitIssue() {
                     onMapReady={handleMapReady}
                     selectedLocation={selectedLocation}
                     onLocationSelect={handleLocationSelect}
-                    onLocationFound={(lat, lng) => handleLocationSelect({ lat, lng })}
+                    onLocationFound={(lat, lng) => {
+                      setIsDetectingLocation(false);
+                      handleLocationSelect({ lat, lng });
+                    }}
                   />
                   
                   {/* Floating Overlay for status */}
-                  {!selectedLocation && (
+                  {!selectedLocation && isDetectingLocation && (
+                    <div className="absolute inset-x-0 bottom-8 flex justify-center z-[1000] px-4">
+                      <div className="bg-slate-900/90 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3">
+                        <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                        <span className="text-sm font-medium">Detecting your location...</span>
+                      </div>
+                    </div>
+                  )}
+                  {!selectedLocation && !isDetectingLocation && (
                     <div className="absolute inset-x-0 bottom-8 flex justify-center z-[1000] px-4">
                       <div className="bg-slate-900/90 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce">
                         <MapPin className="h-5 w-5 text-blue-400" />

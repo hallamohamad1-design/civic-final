@@ -78,9 +78,7 @@ function MapEvents({ onLocationSelect, onMapReady, onLocationFound }: MapEventsP
     
     if (!(window as any)._hasAutoLocated) {
       (window as any)._hasAutoLocated = true;
-      setTimeout(() => {
-        map.locate({ setView: true, maxZoom: 15 });
-      }, 500);
+      map.locate({ setView: true, maxZoom: 15 });
     }
   }, [map, onMapReady]);
 
