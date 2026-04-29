@@ -20,6 +20,7 @@ import {
   hideIssue,
   unhideIssue,
   getHiddenIssues,
+  getAdminAllIssues,
   upsertUser,
   updateUserSettings,
   getUserByEmail,
@@ -198,7 +199,7 @@ export const appRouter = router({
 
   issues: router({
     list: publicProcedure
-      .input(z.object({ limit: z.number().min(1).max(100).default(50), offset: z.number().min(0).default(0) }).partial())
+      .input(z.object({ limit: z.number().min(1).max(500).default(50), offset: z.number().min(0).default(0) }).partial())
       .query(async ({ input }) => {
         return await getIssues(input.limit ?? 50, input.offset ?? 0);
       }),
@@ -296,6 +297,9 @@ export const appRouter = router({
     getHiddenIssues: adminProcedure
       .input(z.object({ limit: z.number().min(1).max(100).default(50), offset: z.number().min(0).default(0) }).partial())
       .query(async () => await getHiddenIssues(50, 0)),
+
+    getAllIssues: adminProcedure
+      .query(async () => await getAdminAllIssues()),
 
     hideIssue: adminProcedure
       .input(z.number())

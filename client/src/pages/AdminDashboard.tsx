@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Users, AlertTriangle, Eye, EyeOff, BarChart3, TrendingUp, Shield, Loader2, CalendarDays, RefreshCw, Download, LogOut } from "lucide-react";
+import { AlertCircle, Users, AlertTriangle, EyeOff, BarChart3, TrendingUp, Shield, Loader2, CalendarDays, RefreshCw, Download, LogOut } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -18,33 +18,57 @@ export default function AdminDashboard() {
   const [, navigate] = useLocation();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  const isAdmin = !!user && user.role === "admin";
+
   useEffect(() => {
-    if (!loading && (!user || user.role !== "admin")) {
+    if (!loading && !isAdmin) {
       navigate("/dashboard");
     }
-  }, [user, loading, navigate]);
+  }, [user, loading, navigate, isAdmin]);
 
-  // Teammate's queries
-  const { data: stats, isLoading: statsLoading } = trpc.admin.getStats.useQuery(undefined, {
-    enabled: !!user && user.role === "admin",
+  // ─── Live Data Queries ────────────────────────────────────────────
+  // 1. Aggregated stats from dedicated server procedure (counts, status, risk)
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    refetch: refetchStats,
+  } = trpc.admin.getStats.useQuery(undefined, {
+    enabled: isAdmin,
+    refetchInterval: 30_000, // auto-refresh every 30s
   });
 
-  const { data: hiddenIssues, isLoading: hiddenLoading } = trpc.admin.getHiddenIssues.useQuery({}, {
-    enabled: !!user && user.role === "admin",
+  // 2. Full issue list with user JOIN (for feed, charts, export)
+  const {
+    data: issues,
+    isLoading: isIssuesLoading,
+    refetch: refetchIssues,
+  } = trpc.admin.getAllIssues.useQuery(undefined, {
+    enabled: isAdmin,
+    refetchInterval: 30_000,
   });
 
-  const { data: allIssues } = trpc.issues.list.useQuery({}, {
-    enabled: !!user && user.role === "admin",
+  // 3. Hidden issues
+  const {
+    data: hiddenIssues,
+    isLoading: hiddenLoading,
+    refetch: refetchHidden,
+  } = trpc.admin.getHiddenIssues.useQuery({}, {
+    enabled: isAdmin,
+    refetchInterval: 30_000,
   });
 
-  // My queries
-  const { data: issues, isLoading: isIssuesLoading, refetch } = trpc.issues.list.useQuery({ limit: 1000 }, {
-    enabled: !!user && user.role === "admin"
-  });
+  // ─── Sync All Data ────────────────────────────────────────────────
+  const isSyncing = statsLoading || isIssuesLoading || hiddenLoading;
 
-  // My computations
+  const handleSyncAll = () => {
+    refetchStats();
+    refetchIssues();
+    refetchHidden();
+  };
+
+  // ─── Chart Computations (derived from live issues) ────────────────
   const areaData = useMemo(() => {
-    if (!issues) return [];
+    if (!issues || issues.length === 0) return [];
     const counts: Record<string, number> = {};
     issues.forEach((i: any) => {
       const area = i.address ? i.address.split(',')[0].trim() : "Unknown";
@@ -57,26 +81,30 @@ export default function AdminDashboard() {
   }, [issues]);
 
   const statusData = useMemo(() => {
-    if (!issues) return [];
+    if (!issues || issues.length === 0) return [];
     const localStats = {
       solved: issues.filter((i: any) => i.status === "resolved").length,
       inProgress: issues.filter((i: any) => i.status === "in-progress").length,
       pending: issues.filter((i: any) => i.status === "open").length,
     };
     return [
-      { name: "Solved", value: localStats.solved },
+      { name: "Resolved", value: localStats.solved },
       { name: "In Progress", value: localStats.inProgress },
-      { name: "Pending", value: localStats.pending },
+      { name: "Open", value: localStats.pending },
     ].filter(d => d.value > 0);
   }, [issues]);
 
-  const handleExport = (timeframe: "daily" | "monthly") => {
-    if (!issues) return;
+  // ─── Excel Export (uses live data) ────────────────────────────────
+  const handleExport = async (timeframe: "daily" | "monthly") => {
+    // Force a fresh fetch before exporting
+    const freshData = await refetchIssues();
+    const exportSource = freshData.data ?? issues;
+    if (!exportSource || exportSource.length === 0) return;
 
     const now = new Date();
     const cutoffDate = timeframe === "daily" ? subDays(now, 1) : subMonths(now, 1);
 
-    const filteredIssues = issues.filter((i: any) => {
+    const filteredIssues = exportSource.filter((i: any) => {
       const issueDate = new Date(i.createdAt);
       return isAfter(issueDate, cutoffDate);
     });
@@ -86,10 +114,17 @@ export default function AdminDashboard() {
       "User Email": i.userEmail || "N/A",
       "Issue Category": i.category,
       "Issue Details": i.description,
-      "Location/Coordinates": `${i.address} (${i.latitude}, ${i.longitude})`,
+      "Location/Coordinates": `${i.address || "N/A"} (${i.latitude}, ${i.longitude})`,
       "Status": i.status,
+      "Severity": i.severity || "N/A",
+      "Risk Level": i.riskLevel || "N/A",
       "Date Submitted": format(new Date(i.createdAt), "yyyy-MM-dd HH:mm:ss")
     }));
+
+    if (exportData.length === 0) {
+      alert(`No issues found in the ${timeframe === "daily" ? "last 24 hours" : "last 30 days"}.`);
+      return;
+    }
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
@@ -97,6 +132,7 @@ export default function AdminDashboard() {
     XLSX.writeFile(workbook, `civicpulse_report_${timeframe}_${format(now, "yyyyMMdd")}.xlsx`);
   };
 
+  // ─── Loading / Auth Guard ─────────────────────────────────────────
   if (loading || !user || user.role !== "admin") {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -105,7 +141,7 @@ export default function AdminDashboard() {
     );
   }
 
-  // Teammate's stat calculations
+  // ─── Stat Values (from server aggregates) ─────────────────────────
   const totalIssues = stats?.totalIssues ?? 0;
   const todayIssues = stats?.todayIssues ?? 0;
   const totalUsers = stats?.totalUsers ?? 0;
@@ -120,7 +156,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-      {/* My Admin Header */}
+      {/* Admin Header */}
       <div className="bg-slate-900 text-white shadow-md">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -138,11 +174,14 @@ export default function AdminDashboard() {
       </div>
 
       <div className="container mx-auto py-8 px-4">
-        {/* Page Title & Actions (Merged) */}
+        {/* Page Title & Actions */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">Dashboard Overview</h1>
-            <p className="text-slate-500 dark:text-slate-400">Monitor community reports, system metrics, and generate exports.</p>
+            <p className="text-slate-500 dark:text-slate-400">
+              Live data from your database — auto-refreshes every 30 seconds.
+              {issues && <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">({issues.length} total issues)</span>}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             {statsLoading && (
@@ -152,9 +191,9 @@ export default function AdminDashboard() {
               </div>
             )}
             
-            <Button variant="outline" className="bg-white dark:bg-slate-800" onClick={() => refetch()} disabled={isIssuesLoading}>
-              {isIssuesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-              {isIssuesLoading ? "Syncing..." : "Sync Data"}
+            <Button variant="outline" className="bg-white dark:bg-slate-800" onClick={handleSyncAll} disabled={isSyncing}>
+              {isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              {isSyncing ? "Syncing..." : "Sync Data"}
             </Button>
             
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
@@ -168,7 +207,7 @@ export default function AdminDashboard() {
                 <DialogHeader>
                   <DialogTitle>Generate Data Report</DialogTitle>
                   <DialogDescription>
-                    Select the timeframe for your export. The resulting Excel (.xlsx) file will download automatically containing all records from the selected period.
+                    Select the timeframe for your export. The system will fetch the latest data before generating the Excel file.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-3 mt-4">
@@ -190,7 +229,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Teammate's Stats Grid - Row 1 */}
+        {/* Stats Grid - Row 1 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
             <CardContent className="pt-6">
@@ -241,7 +280,7 @@ export default function AdminDashboard() {
           </Card>
         </div>
 
-        {/* Teammate's Stage Breakdown */}
+        {/* Stage Breakdown */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
           <Card className="shadow-sm">
             <CardContent className="pt-6">
@@ -275,7 +314,7 @@ export default function AdminDashboard() {
           </Card>
         </div>
 
-        {/* My Recharts Visualizations */}
+        {/* Charts - Connected to Live Data */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           <Card>
             <CardHeader>
@@ -283,7 +322,9 @@ export default function AdminDashboard() {
               <CardDescription>Top 5 areas with most reported issues</CardDescription>
             </CardHeader>
             <CardContent className="h-[300px]">
-              {areaData.length > 0 ? (
+              {isIssuesLoading ? (
+                <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : areaData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={areaData}>
                     <XAxis dataKey="name" />
@@ -304,7 +345,9 @@ export default function AdminDashboard() {
               <CardDescription>Breakdown of all issues by current status</CardDescription>
             </CardHeader>
             <CardContent className="h-[300px]">
-              {statusData.length > 0 ? (
+              {isIssuesLoading ? (
+                <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : statusData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -316,7 +359,7 @@ export default function AdminDashboard() {
                       paddingAngle={5}
                       dataKey="value"
                     >
-                      {statusData.map((entry, index) => (
+                      {statusData.map((_entry, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -393,14 +436,15 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
-          {/* My Live Issue Feed combined with Recent Issues */}
+          {/* Live Issue Feed */}
           <Card className="shadow-sm lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-amber-500" />
-                Live Issue Feed (Recent)
+                Live Issue Feed
+                {issues && <Badge variant="secondary" className="ml-2">{issues.length} issues</Badge>}
               </CardTitle>
-              <CardDescription>Latest reported civic issues with reporter details</CardDescription>
+              <CardDescription>All reported civic issues from the database, newest first</CardDescription>
             </CardHeader>
             <CardContent>
               {isIssuesLoading ? (
@@ -418,9 +462,15 @@ export default function AdminDashboard() {
                               {issue.severity}
                             </Badge>
                           )}
+                          {issue.isHidden === 1 && (
+                            <Badge variant="outline" className="text-orange-600 border-orange-300">Hidden</Badge>
+                          )}
                         </div>
                         <p className="font-medium text-sm mb-1">{issue.title}</p>
                         <p className="text-sm text-muted-foreground line-clamp-2">{issue.description}</p>
+                        {issue.userEmail && (
+                          <p className="text-xs text-muted-foreground mt-1">📧 {issue.userEmail}</p>
+                        )}
                       </div>
                       <div className="flex flex-col items-end gap-2 min-w-[120px]">
                         <Badge variant={issue.status === 'resolved' ? 'default' : issue.status === 'in-progress' ? 'secondary' : 'destructive'}>
@@ -440,7 +490,7 @@ export default function AdminDashboard() {
           </Card>
         </div>
 
-        {/* Quick Actions (Teammate's feature) */}
+        {/* Quick Actions */}
         <Card className="mt-6 shadow-sm">
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>

@@ -1,4 +1,4 @@
-import { eq, sql, and, lt } from "drizzle-orm";
+import { eq, sql, and, lt, desc } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, issues, InsertIssue, issueImages, userVotes } from "../drizzle/schema";
@@ -231,7 +231,7 @@ export async function getAdminAllIssues() {
       userId: users.id,
       userName: users.name,
       userEmail: users.email,
-    }).from(issues).leftJoin(users, eq(issues.userId, users.id)).orderBy(issues.createdAt);
+    }).from(issues).leftJoin(users, eq(issues.userId, users.id)).orderBy(desc(issues.createdAt));
     return result;
   } catch (error) {
     console.error("[Database] Failed to get admin issues:", error);
