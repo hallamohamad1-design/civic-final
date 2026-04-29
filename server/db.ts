@@ -318,13 +318,17 @@ export async function createIssue(data: InsertIssue) {
       throw new Error(`User with ID ${data.userId} not found in database. Please try logging out and in again.`);
     }
 
-    const result = await db.insert(issues).values(data);
+    // Clean data: remove empty strings for optional fields to let defaults work
+    const cleanData: any = { ...data };
+    if (!cleanData.imageUrl) delete cleanData.imageUrl;
+
+    const result = await db.insert(issues).values(cleanData);
     const insertedId = result[0].insertId;
     return await getIssueById(Number(insertedId));
   } catch (error: any) {
     console.error("[Database] Failed to create issue:", error);
     // Extract a more useful message from the MySQL error if available
-    const mysqlError = error.sqlMessage || error.message || "Unknown database error";
+    const mysqlError = error.sqlMessage || error.message || JSON.stringify(error);
     throw new Error(`Database Error: ${mysqlError}`);
   }
 }

@@ -456,13 +456,10 @@ export const appRouter = router({
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
         try {
+          // Use geocode.maps.co as a free, more reliable alternative to official Nominatim
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${input.lat}&lon=${input.lng}&zoom=18&addressdetails=1`,
+            `https://geocode.maps.co/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
             {
-              headers: {
-                "User-Agent": "CivicPulse/1.1 (Contact: hallamohamad1@gmail.com; Web: civicpulse.app)",
-                "Accept-Language": "en,ar",
-              },
               signal: controller.signal,
             }
           );
