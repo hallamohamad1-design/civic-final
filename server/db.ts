@@ -49,15 +49,31 @@ export async function getDb() {
       // AUTO-MIGRATION CHECK: Add missing columns or update lengths if they don't exist
       try {
         console.log("[Database] Running auto-migration check...");
-        const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM issues");
+        // Ensure the new table exists with the correct structure
+        await _pool.query(`
+          CREATE TABLE IF NOT EXISTS civic_issues_v2 (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            userId INT NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            category VARCHAR(64) NOT NULL,
+            status ENUM('open', 'in-progress', 'resolved') DEFAULT 'open' NOT NULL,
+            severity ENUM('low', 'medium', 'high') DEFAULT 'medium' NOT NULL,
+            riskLevel ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium' NOT NULL,
+            isHidden INT DEFAULT 0 NOT NULL,
+            address VARCHAR(512) NOT NULL,
+            latitude VARCHAR(64) NOT NULL,
+            longitude VARCHAR(64) NOT NULL,
+            imageUrl LONGTEXT,
+            upvotes INT DEFAULT 0 NOT NULL,
+            resolutionRating INT DEFAULT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL
+          )
+        `);
+
+        const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM civic_issues_v2");
         const issuesColDetails = (issuesColumns as any[]);
-        
-        // Update address length to 512
-        const addressCol = issuesColDetails.find(c => c.Field === 'address');
-        if (addressCol && addressCol.Type.includes('varchar(255)')) {
-          console.log("[Database] Updating issues.address length to 512...");
-          await _pool.query("ALTER TABLE issues MODIFY COLUMN address VARCHAR(512) NOT NULL");
-        }
 
         // Update imageUrl to LONGTEXT
         const imageUrlCol = issuesColDetails.find(c => c.Field === 'imageUrl');

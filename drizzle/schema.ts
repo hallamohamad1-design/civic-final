@@ -33,7 +33,7 @@ export type InsertUser = typeof users.$inferInsert;
  * Issues table for civic issue reporting.
  * Stores community-reported infrastructure and civic issues with location data.
  */
-export const issues = mysqlTable("issues", {
+export const issues = mysqlTable("civic_issues_v2", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull().references(() => users.id),
   title: varchar("title", { length: 255 }).notNull(),
