@@ -381,6 +381,11 @@ export const appRouter = router({
       .input(z.object({ issueId: z.number(), riskLevel: z.enum(["low", "medium", "high", "critical"]) }))
       .mutation(async ({ input }) => await updateIssueRiskLevel(input.issueId, input.riskLevel)),
 
+    listAll: adminProcedure
+      .query(async () => {
+        return await getAdminAllIssues();
+      }),
+
     getStats: adminProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;

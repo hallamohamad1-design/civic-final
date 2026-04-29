@@ -40,7 +40,7 @@ export default function AdminDashboard() {
   });
 
   // My queries
-  const { data: issues, isLoading: isIssuesLoading, refetch } = trpc.issues.list.useQuery({ limit: 1000 }, {
+  const { data: issues, isLoading: isIssuesLoading, refetch } = trpc.admin.listAll.useQuery(undefined, {
     enabled: !!user && user.role === "admin"
   });
 
