@@ -153,6 +153,7 @@ function createAuthContext(userId: number = 1, role: "user" | "admin" = "user"):
     language: "en",
     theme: "light",
     notificationSettings: '{"statusChanges":true,"newComments":true,"emailDigest":true}',
+    password: null,
   };
 
   return {
