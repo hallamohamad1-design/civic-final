@@ -286,6 +286,7 @@ class SDKServer {
               lastSignedIn: signedInAt,
             });
             user = await db.getUserByOpenId(sessionUserId);
+            console.log("[Auth] Auto-created admin user:", user?.email, "role:", user?.role);
           } catch (e) {
             console.error("[Auth] Failed to auto-create admin user:", e);
           }
@@ -293,20 +294,22 @@ class SDKServer {
         if (!user) {
           throw ForbiddenError("Local user not found in database");
         }
-      }
-      try {
-        const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
-        await db.upsertUser({
-          openId: userInfo.openId,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-          lastSignedIn: signedInAt,
-        });
-        user = await db.getUserByOpenId(userInfo.openId);
-      } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
-        throw ForbiddenError("Failed to sync user info");
+      } else {
+        // Only try OAuth sync for non-local users
+        try {
+          const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+          await db.upsertUser({
+            openId: userInfo.openId,
+            name: userInfo.name || null,
+            email: userInfo.email ?? null,
+            loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
+            lastSignedIn: signedInAt,
+          });
+          user = await db.getUserByOpenId(userInfo.openId);
+        } catch (error) {
+          console.error("[Auth] Failed to sync user from OAuth:", error);
+          throw ForbiddenError("Failed to sync user info");
+        }
       }
     }
 

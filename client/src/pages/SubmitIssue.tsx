@@ -217,6 +217,10 @@ export default function SubmitIssue() {
         body: `Your issue "${title.trim()}" was submitted successfully. Thank you!`
       });
 
+      // Invalidate caches so admin dashboard auto-refreshes
+      utils.admin.invalidate();
+      utils.issues.invalidate();
+
       toast.success(t("submit.success"));
       navigate("/map");
     } catch (error: any) {

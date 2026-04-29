@@ -31,31 +31,53 @@ export default function AdminDashboard() {
   const {
     data: stats,
     isLoading: statsLoading,
+    error: statsError,
     refetch: refetchStats,
   } = trpc.admin.getStats.useQuery(undefined, {
     enabled: isAdmin,
     refetchInterval: 30_000, // auto-refresh every 30s
+    retry: 2,
   });
 
   // 2. Full issue list with user JOIN (for feed, charts, export)
   const {
     data: issues,
     isLoading: isIssuesLoading,
+    error: issuesError,
     refetch: refetchIssues,
   } = trpc.admin.getAllIssues.useQuery(undefined, {
     enabled: isAdmin,
     refetchInterval: 30_000,
+    retry: 2,
   });
 
   // 3. Hidden issues
   const {
     data: hiddenIssues,
     isLoading: hiddenLoading,
+    error: hiddenError,
     refetch: refetchHidden,
   } = trpc.admin.getHiddenIssues.useQuery({}, {
     enabled: isAdmin,
     refetchInterval: 30_000,
+    retry: 2,
   });
+
+  // ─── Debug Logging ────────────────────────────────────────────────
+  useEffect(() => {
+    if (stats !== undefined) console.log("Admin Stats Fetched:", stats);
+    if (statsError) console.error("Admin Stats Error:", statsError);
+  }, [stats, statsError]);
+
+  useEffect(() => {
+    if (issues !== undefined) console.log("Admin Issues Fetched:", issues?.length, "issues", issues);
+    if (issuesError) console.error("Admin Issues Error:", issuesError);
+  }, [issues, issuesError]);
+
+  useEffect(() => {
+    if (hiddenIssues !== undefined) console.log("Admin Hidden Issues Fetched:", hiddenIssues?.length);
+    if (hiddenError) console.error("Admin Hidden Issues Error:", hiddenError);
+  }, [hiddenIssues, hiddenError]);
 
   // ─── Sync All Data ────────────────────────────────────────────────
   const isSyncing = statsLoading || isIssuesLoading || hiddenLoading;
@@ -172,6 +194,26 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Error Banner */}
+      {(statsError || issuesError || hiddenError) && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-3">
+          <div className="container mx-auto flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800">Dashboard data loading failed</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                {statsError && <span>Stats: {statsError.message}. </span>}
+                {issuesError && <span>Issues: {issuesError.message}. </span>}
+                {hiddenError && <span>Hidden: {hiddenError.message}. </span>}
+              </p>
+            </div>
+            <Button variant="outline" size="sm" className="text-red-600 border-red-300 hover:bg-red-100" onClick={handleSyncAll}>
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="container mx-auto py-8 px-4">
         {/* Page Title & Actions */}
