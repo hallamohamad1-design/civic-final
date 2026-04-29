@@ -26,6 +26,7 @@ import {
   getUserByEmail,
   getDb,
   rateIssueResolution,
+  updateIssueStatus,
 } from "./db";
 import { issues, users } from "../drizzle/schema";
 import { eq, sql, and, gte } from "drizzle-orm";
@@ -404,7 +405,12 @@ export const appRouter = router({
       .query(async () => await getHiddenIssues(50, 0)),
 
     getAllIssues: adminProcedure
-      .query(async () => await getAdminAllIssues()),
+      .input(z.object({ status: z.string().optional(), riskLevel: z.string().optional() }).optional())
+      .query(async ({ input }) => await getAdminAllIssues(input)),
+
+    updateStatus: adminProcedure
+      .input(z.object({ issueId: z.number(), status: z.enum(["open", "in-progress", "resolved"]) }))
+      .mutation(async ({ input }) => await updateIssueStatus(input.issueId, input.status)),
 
     hideIssue: adminProcedure
       .input(z.number())
@@ -419,8 +425,9 @@ export const appRouter = router({
       .mutation(async ({ input }) => await updateIssueRiskLevel(input.issueId, input.riskLevel)),
 
     listAll: adminProcedure
-      .query(async () => {
-        return await getAdminAllIssues();
+      .input(z.object({ status: z.string().optional(), riskLevel: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        return await getAdminAllIssues(input);
       }),
 
     getStats: adminProcedure.query(async () => {

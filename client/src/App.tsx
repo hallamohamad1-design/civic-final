@@ -11,6 +11,7 @@ import SubmitIssue from "./pages/SubmitIssue";
 import IssueDetail from "./pages/IssueDetail";
 import Dashboard from "./pages/Dashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminSettings from "./pages/AdminSettings";
 import SignUp from "./pages/SignUp";
 import SignIn from "./pages/SignIn";
 import Settings from "./pages/Settings";
@@ -40,6 +41,7 @@ function Router() {
       <Route path={"/issues/:id"} component={IssueDetail} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/admin-dashboard"} component={AdminDashboard} />
+      <Route path={"/admin-dashboard/settings"} component={AdminSettings} />
       <Route path={"/signup"} component={SignUp} />
       <Route path={"/signin"} component={SignIn} />
       <Route path={"/settings"} component={Settings} />

@@ -1,7 +1,7 @@
 import { eq, sql, and, lt, desc } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, issues, InsertIssue, issueImages, userVotes, otpCodes } from "../drizzle/schema";
+import { InsertUser, users, issues, InsertIssue, issueImages, userVotes, otpCodes, notifications, InsertNotification } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -284,11 +284,11 @@ export async function getIssues(limit: number = 50, offset: number = 0) {
   }
 }
 
-export async function getAdminAllIssues() {
+export async function getAdminAllIssues(filters?: { status?: string; riskLevel?: string }) {
   const db = await getDb();
   if (!db) return [];
   try {
-    const result = await db.select({
+    let query = db.select({
       id: issues.id,
       title: issues.title,
       description: issues.description,
@@ -307,8 +307,21 @@ export async function getAdminAllIssues() {
       userId: users.id,
       userName: users.name,
       userEmail: users.email,
-    }).from(issues).leftJoin(users, eq(issues.userId, users.id)).orderBy(desc(issues.createdAt));
-    return result;
+    }).from(issues).leftJoin(users, eq(issues.userId, users.id));
+
+    const whereConditions = [];
+    if (filters?.status) {
+      whereConditions.push(eq(issues.status, filters.status as any));
+    }
+    if (filters?.riskLevel) {
+      whereConditions.push(eq(issues.riskLevel, filters.riskLevel as any));
+    }
+
+    if (whereConditions.length > 0) {
+      query = query.where(and(...whereConditions)) as any;
+    }
+
+    return await query.orderBy(desc(issues.createdAt));
   } catch (error) {
     console.error("[Database] Failed to get admin issues:", error);
     return [];
@@ -485,6 +498,51 @@ export async function getUserVotes(userId: number) {
 }
 
 // AI Risk Detection helpers
+export async function updateIssueStatus(issueId: number, status: "open" | "in-progress" | "resolved") {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    // 1. Update the issue status
+    await db.update(issues).set({ status, updatedAt: new Date() }).where(eq(issues.id, issueId));
+
+    // 2. Get the issue to find the reporter
+    const [issue] = await db.select().from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (issue) {
+      // 3. Create a notification for the reporter
+      const statusLabels = {
+        "open": "Open",
+        "in-progress": "In Progress",
+        "resolved": "Resolved"
+      };
+
+      await createNotification({
+        userId: issue.userId,
+        issueId: issue.id,
+        title: "Issue Status Updated",
+        message: `The status of your issue "${issue.title}" has been updated to ${statusLabels[status]}.`,
+        type: "status_change"
+      });
+    }
+
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to update issue status:", error);
+    return false;
+  }
+}
+
+export async function createNotification(notification: InsertNotification) {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    await db.insert(notifications).values(notification);
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to create notification:", error);
+    return false;
+  }
+}
+
 export async function updateIssueRiskLevel(id: number, riskLevel: "low" | "medium" | "high" | "critical") {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
