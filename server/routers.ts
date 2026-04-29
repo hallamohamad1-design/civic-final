@@ -39,18 +39,48 @@ import { sdk } from "./_core/sdk";
 import { ONE_YEAR_MS } from "@shared/const";
 import { createAndSendOtp, verifyOtp } from "./services/otpService";
 
-// Admin procedure - requires admin role
-const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin") {
+// Admin procedure - requires admin role OR fixed admin email bypass
+const ADMIN_EMAILS = ["admincivicpulse123@gmail.com"];
+
+const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const userEmail = (ctx.user.email || "").trim().toLowerCase();
+  const isAdminByRole = ctx.user.role === "admin";
+  const isAdminByEmail = ADMIN_EMAILS.includes(userEmail);
+
+  if (!isAdminByRole && !isAdminByEmail) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
   }
+
+  // If admin by email but DB role is wrong, auto-fix it
+  if (isAdminByEmail && !isAdminByRole) {
+    console.log(`[Admin] Auto-fixing role for ${userEmail} (was: ${ctx.user.role})`);
+    try {
+      await upsertUser({
+        openId: ctx.user.openId,
+        email: userEmail,
+        role: "admin",
+      });
+    } catch (e) {
+      console.error("[Admin] Failed to auto-fix role:", e);
+    }
+  }
+
   return next({ ctx });
 });
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(opts => {
+      const user = opts.ctx.user;
+      if (!user) return null;
+      // Ensure the fixed admin always gets role: "admin" on the frontend
+      const userEmail = (user.email || "").trim().toLowerCase();
+      if (ADMIN_EMAILS.includes(userEmail) && user.role !== "admin") {
+        return { ...user, role: "admin" as const };
+      }
+      return user;
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
