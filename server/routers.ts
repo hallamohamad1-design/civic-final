@@ -4,6 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { fireWebhook } from "./services/webhookService";
 import {
   getIssues,
   getIssueById,
@@ -333,6 +334,19 @@ export const appRouter = router({
             riskLevel: riskLevel,
             isHidden: isHidden,
           });
+
+          // Fire-and-forget: send to n8n for AI-powered analysis
+          if (newIssue) {
+            fireWebhook({
+              issue_id: newIssue.id,
+              user_name: ctx.user.name || "Anonymous",
+              user_email: ctx.user.email || "",
+              description: input.description,
+              image_url: input.imageUrl || "",
+              location: input.address,
+              timestamp: new Date().toISOString(),
+            });
+          }
 
           // Notify Admin
           try {
