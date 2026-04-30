@@ -27,6 +27,10 @@ import {
   getDb,
   rateIssueResolution,
   updateIssueStatus,
+  getNotifications,
+  markNotificationAsRead,
+  clearAllNotifications,
+  createNotification,
 } from "./db";
 import { issues, users } from "../drizzle/schema";
 import { eq, sql, and, gte } from "drizzle-orm";
@@ -316,7 +320,7 @@ export const appRouter = router({
             // Otherwise, keep default riskLevel and isHidden
           }
 
-          return await createIssue({
+          const newIssue = await createIssue({
             userId: ctx.user.id,
             title: input.title,
             description: input.description,
@@ -329,6 +333,24 @@ export const appRouter = router({
             riskLevel: riskLevel,
             isHidden: isHidden,
           });
+
+          // Notify Admin
+          try {
+            const adminUser = await getUserByEmail("admincivicpulse123@gmail.com");
+            if (adminUser && newIssue) {
+              await createNotification({
+                userId: adminUser.id,
+                issueId: newIssue.id,
+                title: "New Issue Reported",
+                message: `New Issue Reported: ${input.category} by ${ctx.user.name || 'User'}`,
+                type: "new_issue"
+              });
+            }
+          } catch (notifErr) {
+            console.error("[Notification] Failed to notify admin:", notifErr);
+          }
+
+          return newIssue;
         } catch (error: any) {
           console.error("Failed to create issue:", error);
           if (error instanceof TRPCError) throw error;
@@ -548,6 +570,15 @@ export const appRouter = router({
           return [];
         }
       }),
+  }),
+  notifications: router({
+    list: protectedProcedure
+      .query(async ({ ctx }) => await getNotifications(ctx.user.id)),
+    markAsRead: protectedProcedure
+      .input(z.number())
+      .mutation(async ({ input }) => await markNotificationAsRead(input)),
+    clearAll: protectedProcedure
+      .mutation(async ({ ctx }) => await clearAllNotifications(ctx.user.id)),
   }),
 });
 

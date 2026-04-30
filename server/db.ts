@@ -535,10 +535,50 @@ export async function createNotification(notification: InsertNotification) {
   const db = await getDb();
   if (!db) return null;
   try {
-    await db.insert(notifications).values(notification);
-    return true;
+    const [result] = await db.insert(notifications).values(notification);
+    return result;
   } catch (error) {
     console.error("[Database] Failed to create notification:", error);
+    return false;
+  }
+}
+
+export async function getNotifications(userId: number, limit: number = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    return await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(sql`${notifications.createdAt} DESC`)
+      .limit(limit);
+  } catch (error) {
+    console.error("[Database] Failed to get notifications:", error);
+    return [];
+  }
+}
+
+export async function markNotificationAsRead(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.update(notifications).set({ isRead: 1 }).where(eq(notifications.id, id));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to mark notification as read:", error);
+    return false;
+  }
+}
+
+export async function clearAllNotifications(userId: number) {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.delete(notifications).where(eq(notifications.userId, userId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to clear notifications:", error);
     return false;
   }
 }

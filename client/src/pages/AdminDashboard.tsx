@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Users, AlertTriangle, EyeOff, BarChart3, TrendingUp, Shield, Loader2, CalendarDays, RefreshCw, Download, LogOut } from "lucide-react";
+import { AlertCircle, Users, AlertTriangle, EyeOff, BarChart3, TrendingUp, Shield, Loader2, CalendarDays, RefreshCw, Download, LogOut, Bell, Check, Trash, CheckCheck } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -10,7 +10,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import * as XLSX from "xlsx";
 import { format, subDays, subMonths, isAfter } from "date-fns";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { toast } from "sonner";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
@@ -18,12 +20,26 @@ export default function AdminDashboard() {
   const { user, loading, logout } = useAuth();
   const { t, isRTL } = useLanguage();
   const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
+  
+  // Notification State
+  const { data: notifications, isLoading: isNotifLoading } = trpc.notifications.list.useQuery();
+  const markReadMutation = trpc.notifications.markAsRead.useMutation({
+    onSuccess: () => utils.notifications.list.invalidate()
+  });
+  const clearAllMutation = trpc.notifications.clearAll.useMutation({
+    onSuccess: () => {
+      utils.notifications.list.invalidate();
+      toast.success(t("admin.notificationsCleared") || "Notifications cleared");
+    }
+  });
+
+  const unreadCount = notifications?.filter(n => !n.isRead).length ?? 0;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [riskFilter, setRiskFilter] = useState<string | undefined>(undefined);
 
   const isAdmin = !!user && user.role === "admin";
-  const utils = trpc.useUtils();
 
   useEffect(() => {
     if (!loading && !isAdmin) {
@@ -208,6 +224,76 @@ export default function AdminDashboard() {
             <span className="font-bold text-xl tracking-tight hidden sm:inline-block">{t("admin.title")}</span>
           </div>
           <div className="flex items-center gap-4">
+            {/* Notification Bell */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative text-slate-300 hover:text-white hover:bg-slate-800">
+                  <Bell className="h-5 w-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0 overflow-hidden" align="end">
+                <div className="bg-slate-900 text-white p-3 flex items-center justify-between">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <Bell className="h-4 w-4" />
+                    {t("admin.notifications") || "Notifications"}
+                  </h3>
+                  {notifications && notifications.length > 0 && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-7 text-[10px] hover:bg-slate-800 text-slate-400 hover:text-white"
+                      onClick={() => clearAllMutation.mutate()}
+                    >
+                      <Trash className="h-3 w-3 mr-1" />
+                      {t("admin.clearAll") || "Clear All"}
+                    </Button>
+                  )}
+                </div>
+                <div className="max-h-[400px] overflow-y-auto">
+                  {isNotifLoading ? (
+                    <div className="p-8 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-slate-400" /></div>
+                  ) : notifications && notifications.length > 0 ? (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {notifications.map((n) => (
+                        <div 
+                          key={n.id} 
+                          className={`p-3 hover:bg-slate-50 dark:hover:bg-slate-900 cursor-pointer transition-colors ${!n.isRead ? 'bg-primary/5 border-l-2 border-primary' : ''}`}
+                          onClick={() => {
+                            if (!n.isRead) markReadMutation.mutate(n.id);
+                            // If it's a new issue notification, we could navigate or filter
+                            if (n.issueId) {
+                              // Custom logic to focus on this issue
+                              toast.info(t("admin.navigatingToIssue") || "Navigating to issue...");
+                            }
+                          }}
+                        >
+                          <div className="flex justify-between items-start gap-2">
+                            <p className={`text-xs ${!n.isRead ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'}`}>
+                              {n.message}
+                            </p>
+                            {!n.isRead && <div className="h-2 w-2 rounded-full bg-primary mt-1 flex-shrink-0" />}
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            {format(new Date(n.createdAt), 'MMM d, h:mm a')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-slate-400 text-xs italic">
+                      {t("admin.noNotifications") || "No notifications yet"}
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+
             <div className="text-right hidden md:block">
               <p className="text-sm font-medium leading-none">{user.name}</p>
               <p className="text-xs text-slate-400 mt-1">{user.email}</p>
