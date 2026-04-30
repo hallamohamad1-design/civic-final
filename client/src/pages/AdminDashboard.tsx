@@ -318,6 +318,8 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* Summary Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card 
             className={`cursor-pointer transition-all hover:scale-[1.02] border-0 text-white shadow-lg bg-gradient-to-br from-blue-500 to-blue-600 ${!statusFilter && !riskFilter ? 'ring-2 ring-blue-400 ring-offset-2' : ''}`}
             onClick={() => { setStatusFilter(undefined); setRiskFilter(undefined); }}
@@ -377,6 +379,7 @@ export default function AdminDashboard() {
               </div>
             </CardContent>
           </Card>
+        </div>
 
         {/* Stage Breakdown */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
