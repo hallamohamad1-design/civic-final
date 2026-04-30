@@ -1,0 +1,202 @@
+{
+    "name": "CivicPulse AI Issue Detection",
+    "nodes": [
+        {
+            "parameters": {
+                "path": "civicpulse",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {
+                    "responseHeaders": {
+                        "entries": [
+                            {
+                                "name": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ]
+                    }
+                },
+                "authentication": "headerAuth"
+            },
+            "id": "1",
+            "name": "CivicPulse Issue Received",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                200,
+                300
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "WEBHOOK_HEADER_AUTH",
+                    "name": "Webhook Header Auth"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "url": "https://api.anthropic.com/v1/messages",
+                "method": "POST",
+                "jsonParameters": true,
+                "options": {
+                    "retryOnFail": true,
+                    "maxTries": 3,
+                    "waitBetweenTries": 5000
+                },
+                "headerParametersJson": "{\n  \"x-api-key\": \"{{$env.ANTHROPIC_API_KEY}}\",\n  \"anthropic-version\": \"2023-06-01\",\n  \"content-type\": \"application/json\"\n}",
+                "bodyParametersJson": "{\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1024,\n  \"system\": \"You are an expert civil infrastructure analyst and AI triage agent for CivicPulse, a community issue-reporting platform.\\n\\n## Your Job\\nAnalyze the submitted civic issue — which includes a user text description and a photo — and return a structured JSON object with your findings. You MUST respond with ONLY valid JSON. No preamble. No explanation. No markdown code fences.\\n\\n## Classification Categories\\nChoose exactly ONE from:\\n- \\\"Road Damage\\\" (potholes, cracks, collapsed surface, broken curb)\\n- \\\"Waste / Garbage\\\" (illegal dumping, overflowing bins, litter accumulation)\\n- \\\"Drainage / Flooding\\\" (blocked drains, standing water, flood risk)\\n- \\\"Street Lighting\\\" (broken lights, dark streets, damaged poles)\\n- \\\"Public Property Damage\\\" (broken benches, vandalism, damaged signs, graffiti)\\n- \\\"Sewage / Water Leak\\\" (pipe burst, sewage overflow, water main leak)\\n- \\\"Other\\\" (use only if none of the above apply — then describe in summary)\\n\\n## Severity Levels\\nAssign exactly ONE:\\n- \\\"Critical\\\" — immediate public safety risk, road impassable, sewage overflow\\n- \\\"High\\\" — significant hazard, likely to worsen quickly, affects many people\\n- \\\"Medium\\\" — moderate inconvenience, not immediately dangerous, should be fixed within a week\\n- \\\"Low\\\" — minor issue, aesthetic or low-impact, can be scheduled\\n\\n## Output Format\\nReturn ONLY this JSON structure — no other text:\\n\\n{\\n  \\\"category\\\": \\\"<one of the categories above>\\\",\\n  \\\"severity\\\": \\\"<Critical | High | Medium | Low>\\\",\\n  \\\"confidence\\\": <0.0 to 1.0>,\\n  \\\"summary\\\": \\\"<2-3 sentences describing the problem based on the photo and description>\\\",\\n  \\\"detected_cause\\\": \\\"<visible cause from photo, or null if not determinable>\\\",\\n  \\\"estimated_affected_area\\\": \\\"<small / medium / large / unknown>\\\",\\n  \\\"recommended_action\\\": \\\"<specific actionable step for the municipal team>\\\",\\n  \\\"urgency_reason\\\": \\\"<one sentence explaining why this severity level was assigned>\\\"\\n}\\n\\n## Rules\\n- Base your analysis primarily on the PHOTO. Use the text description as supporting context.\\n- If the photo is unclear or missing, state this in summary and set confidence below 0.5.\\n- NEVER invent details not visible in the photo or stated in the description.\\n- If uncertain between two categories, pick the most likely one and reflect uncertainty in confidence score.\\n- recommended_action MUST be specific (e.g., \\\"Dispatch road repair crew to fill pothole at reported location\\\" not \\\"Fix the road\\\").\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"image\",\n          \"source\": {\n            \"type\": \"url\",\n            \"url\": \"{{$json.body.image_url}}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"Issue submitted by {{$json.body.user_name}}.\\nDescription: {{$json.body.description}}\\nLocation: {{$json.body.location}}\\nTimestamp: {{$json.body.timestamp}}\"\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "id": "2",
+            "name": "AI Issue Detector",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "name": "aiResult",
+                            "value": "={{ JSON.parse($json.content[0].text) }}",
+                            "type": "object"
+                        },
+                        {
+                            "name": "category",
+                            "value": "={{ $json.aiResult.category }}",
+                            "type": "string"
+                        },
+                        {
+                            "name": "severity",
+                            "value": "={{ $json.aiResult.severity }}",
+                            "type": "string"
+                        },
+                        {
+                            "name": "confidence",
+                            "value": "={{ $json.aiResult.confidence }}",
+                            "type": "number"
+                        },
+                        {
+                            "name": "summary",
+                            "value": "={{ $json.aiResult.summary }}",
+                            "type": "string"
+                        },
+                        {
+                            "name": "detected_cause",
+                            "value": "={{ $json.aiResult.detected_cause }}",
+                            "type": "string"
+                        },
+                        {
+                            "name": "recommended_action",
+                            "value": "={{ $json.aiResult.recommended_action }}",
+                            "type": "string"
+                        },
+                        {
+                            "name": "urgency_reason",
+                            "value": "={{ $json.aiResult.urgency_reason }}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "3",
+            "name": "Parse AI Result",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3,
+            "position": [
+                700,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "send",
+                "to": "={{ $env.ADMIN_EMAIL }}",
+                "subject": "=[CivicPulse Alert] {{$node[\"Parse AI Result\"].json.severity}} – {{$node[\"Parse AI Result\"].json.category}} – {{$node[\"CivicPulse Issue Received\"].json.body.issue_id}}",
+                "emailType": "html",
+                "message": "\n<div style=\"font-family: Arial, sans-serif; padding: 20px;\">\n  <h2 style=\"color:#333;\">🚨 CivicPulse Issue Alert</h2>\n  <p><strong>Severity:</strong> <span style=\"color:red;\">{{$node[\"Parse AI Result\"].json.severity}}</span></p>\n  <p><strong>Category:</strong> {{$node[\"Parse AI Result\"].json.category}}</p>\n  <p><strong>Summary:</strong> {{$node[\"Parse AI Result\"].json.summary}}</p>\n  <p><strong>Detected Cause:</strong> {{$node[\"Parse AI Result\"].json.detected_cause}}</p>\n  <p><strong>Recommended Action:</strong> {{$node[\"Parse AI Result\"].json.recommended_action}}</p>\n  <p><strong>Urgency Reason:</strong> {{$node[\"Parse AI Result\"].json.urgency_reason}}</p>\n  <p><strong>Confidence:</strong> {{$node[\"Parse AI Result\"].json.confidence}}</p>\n  <hr>\n  <h3>User Submission</h3>\n  <p><strong>Name:</strong> {{$node[\"CivicPulse Issue Received\"].json.body.user_name}}</p>\n  <p><strong>Email:</strong> {{$node[\"CivicPulse Issue Received\"].json.body.user_email}}</p>\n  <p><strong>Description:</strong> {{$node[\"CivicPulse Issue Received\"].json.body.description}}</p>\n  <p><strong>Timestamp:</strong> {{$node[\"CivicPulse Issue Received\"].json.body.timestamp}}</p>\n  <br>\n  <a href=\"https://civic-final-production.up.railway.app/\" style=\"padding:10px 15px; background:#007bff; color:white; text-decoration:none; border-radius:5px;\">Open Admin Panel</a>\n</div>\n"
+            },
+            "id": "4",
+            "name": "Notify Admin",
+            "type": "n8n-nodes-base.gmail",
+            "typeVersion": 2,
+            "position": [
+                950,
+                300
+            ],
+            "credentials": {
+                "gmailOAuth2": {
+                    "id": "GMAIL_CREDENTIAL",
+                    "name": "Gmail Account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "responseCode": 200,
+                "responseBody": "{ \"status\": \"received\", \"issue_id\": \"{{$node['CivicPulse Issue Received'].json.body.issue_id}}\" }"
+            },
+            "id": "5",
+            "name": "Acknowledge Receipt",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1200,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "CivicPulse Issue Received": {
+            "main": [
+                [
+                    {
+                        "node": "AI Issue Detector",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Issue Detector": {
+            "main": [
+                [
+                    {
+                        "node": "Parse AI Result",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse AI Result": {
+            "main": [
+                [
+                    {
+                        "node": "Notify Admin",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Notify Admin": {
+            "main": [
+                [
+                    {
+                        "node": "Acknowledge Receipt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {},
+    "versionId": "2"
+}
