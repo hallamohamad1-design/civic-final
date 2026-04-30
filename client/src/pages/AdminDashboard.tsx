@@ -10,11 +10,13 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import * as XLSX from "xlsx";
 import { format, subDays, subMonths, isAfter } from "date-fns";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
 export default function AdminDashboard() {
   const { user, loading, logout } = useAuth();
+  const { t, isRTL } = useLanguage();
   const [, navigate] = useLocation();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
@@ -199,15 +201,20 @@ export default function AdminDashboard() {
       {/* Admin Header */}
       <div className="bg-slate-900 text-white shadow-md">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Shield className="w-6 h-6 text-primary" />
-            <span className="font-bold text-xl tracking-tight">CivicPulse Admin</span>
+          <div className="flex items-center gap-3">
+            <div className="bg-primary/20 p-2 rounded-lg border border-primary/30">
+              <Shield className="w-5 h-5 text-primary" />
+            </div>
+            <span className="font-bold text-xl tracking-tight hidden sm:inline-block">{t("admin.title")}</span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-slate-300 hidden md:block">Welcome, {user.name}</span>
-            <Button variant="ghost" onClick={logout} className="text-red-400 hover:text-red-300 hover:bg-slate-800 transition-colors">
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
+            <div className="text-right hidden md:block">
+              <p className="text-sm font-medium leading-none">{user.name}</p>
+              <p className="text-xs text-slate-400 mt-1">{user.email}</p>
+            </div>
+            <Button variant="ghost" size="sm" className="text-slate-300 hover:text-white" onClick={() => logout()}>
+              <LogOut className="h-4 w-4 mr-2" />
+              {t("nav.logout")}
             </Button>
           </div>
         </div>
@@ -237,10 +244,10 @@ export default function AdminDashboard() {
         {/* Page Title & Actions */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">Dashboard Overview</h1>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">{t("admin.sysPref")}</h1>
             <p className="text-slate-500 dark:text-slate-400">
-              Live data from your database — auto-refreshes every 30 seconds.
-              {issues && <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">({issues.length} total issues)</span>}
+              {t("admin.desc")}
+              {issues && <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">({issues.length} {t("dash.totalIssues")})</span>}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -253,7 +260,7 @@ export default function AdminDashboard() {
             
             <Button variant="outline" className="bg-white dark:bg-slate-800" onClick={handleSyncAll} disabled={isSyncing}>
               {isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-              {isSyncing ? "Syncing..." : "Sync Data"}
+              {isSyncing ? t("settings.syncing") : t("admin.syncDb")}
             </Button>
             
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
@@ -292,27 +299,25 @@ export default function AdminDashboard() {
         {/* Active Filters Display */}
         {(statusFilter || riskFilter) && (
           <div className="flex items-center gap-3 mb-6 bg-slate-100 dark:bg-slate-800 p-3 rounded-lg border">
-            <span className="text-sm font-medium text-slate-500">Active Filters:</span>
+            <span className="text-sm font-medium text-slate-500">{t("admin.activeFilters")}:</span>
             {statusFilter && (
               <Badge variant="secondary" className="gap-1 pr-1 capitalize">
-                Status: {statusFilter}
+                {t("detail.status")}: {statusFilter}
                 <button onClick={() => setStatusFilter(undefined)} className="ml-1 hover:text-red-500 font-bold">×</button>
               </Badge>
             )}
             {riskFilter && (
               <Badge variant="secondary" className="gap-1 pr-1 capitalize">
-                Risk: {riskFilter}
+                {t("detail.riskLevel")}: {riskFilter}
                 <button onClick={() => setRiskFilter(undefined)} className="ml-1 hover:text-red-500 font-bold">×</button>
               </Badge>
             )}
             <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(undefined); setRiskFilter(undefined); }} className="text-xs text-slate-500 hover:text-primary">
-              Clear All
+              {t("admin.clearAll")}
             </Button>
           </div>
         )}
 
-        {/* Stats Grid - Row 1 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card 
             className={`cursor-pointer transition-all hover:scale-[1.02] border-0 text-white shadow-lg bg-gradient-to-br from-blue-500 to-blue-600 ${!statusFilter && !riskFilter ? 'ring-2 ring-blue-400 ring-offset-2' : ''}`}
             onClick={() => { setStatusFilter(undefined); setRiskFilter(undefined); }}
@@ -320,7 +325,7 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-blue-100 text-sm font-medium">Total Issues</p>
+                  <p className="text-blue-100 text-sm font-medium">{t("admin.totalIssues")}</p>
                   <p className="text-4xl font-bold mt-1">{totalIssues}</p>
                 </div>
                 <BarChart3 className="h-10 w-10 text-blue-200 opacity-80" />
@@ -335,7 +340,7 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-amber-100 text-sm font-medium">Open Issues</p>
+                  <p className="text-amber-100 text-sm font-medium">{t("admin.open")}</p>
                   <p className="text-4xl font-bold mt-1">{openCount}</p>
                 </div>
                 <AlertCircle className="h-10 w-10 text-amber-200 opacity-80" />
@@ -350,7 +355,7 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-indigo-100 text-sm font-medium">In Progress</p>
+                  <p className="text-indigo-100 text-sm font-medium">{t("admin.inProgress")}</p>
                   <p className="text-4xl font-bold mt-1">{inProgressCount}</p>
                 </div>
                 <TrendingUp className="h-10 w-10 text-indigo-200 opacity-80" />
@@ -365,14 +370,13 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-emerald-100 text-sm font-medium">Resolved</p>
+                  <p className="text-emerald-100 text-sm font-medium">{t("admin.resolved")}</p>
                   <p className="text-4xl font-bold mt-1">{resolvedCount}</p>
                 </div>
                 <Shield className="h-10 w-10 text-emerald-200 opacity-80" />
               </div>
             </CardContent>
           </Card>
-        </div>
 
         {/* Stage Breakdown */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -383,10 +387,10 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 mb-2">
                 <div className="h-3 w-3 rounded-full bg-blue-500" />
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Open</p>
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{t("admin.open")}</p>
               </div>
               <p className="text-3xl font-bold text-slate-900 dark:text-white">{openCount}</p>
-              <p className="text-xs text-slate-400 mt-1">{totalIssues > 0 ? Math.round((openCount / totalIssues) * 100) : 0}% of total</p>
+              <p className="text-xs text-slate-400 mt-1">{totalIssues > 0 ? Math.round((openCount / totalIssues) * 100) : 0}% {t("general.ofTotal")}</p>
             </CardContent>
           </Card>
           <Card 
@@ -396,10 +400,10 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 mb-2">
                 <div className="h-3 w-3 rounded-full bg-amber-500" />
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">In Progress</p>
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{t("admin.inProgress")}</p>
               </div>
               <p className="text-3xl font-bold text-slate-900 dark:text-white">{inProgressCount}</p>
-              <p className="text-xs text-slate-400 mt-1">{totalIssues > 0 ? Math.round((inProgressCount / totalIssues) * 100) : 0}% of total</p>
+              <p className="text-xs text-slate-400 mt-1">{totalIssues > 0 ? Math.round((inProgressCount / totalIssues) * 100) : 0}% {t("general.ofTotal")}</p>
             </CardContent>
           </Card>
           <Card 
@@ -409,10 +413,10 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 mb-2">
                 <div className="h-3 w-3 rounded-full bg-emerald-500" />
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Resolved</p>
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{t("admin.resolved")}</p>
               </div>
               <p className="text-3xl font-bold text-slate-900 dark:text-white">{resolvedCount}</p>
-              <p className="text-xs text-slate-400 mt-1">{totalIssues > 0 ? Math.round((resolvedCount / totalIssues) * 100) : 0}% of total</p>
+              <p className="text-xs text-slate-400 mt-1">{totalIssues > 0 ? Math.round((resolvedCount / totalIssues) * 100) : 0}% {t("general.ofTotal")}</p>
             </CardContent>
           </Card>
         </div>
@@ -421,8 +425,8 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           <Card>
             <CardHeader>
-              <CardTitle>Reports by Geographic Area</CardTitle>
-              <CardDescription>Top 5 areas with most reported issues</CardDescription>
+              <CardTitle>{t("admin.recentIssues")}</CardTitle>
+              <CardDescription>{t("admin.recentDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="h-[300px]">
               {isIssuesLoading ? (
@@ -483,9 +487,9 @@ export default function AdminDashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-red-500" />
-                AI Risk Level Breakdown
+                {t("admin.riskBreakdown")}
               </CardTitle>
-              <CardDescription>Issues categorized by AI-detected risk</CardDescription>
+              <CardDescription>{t("admin.riskDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
@@ -526,9 +530,9 @@ export default function AdminDashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <EyeOff className="w-5 h-5" />
-                Hidden Issues
+                {t("admin.hiddenIssues")}
               </CardTitle>
-              <CardDescription>Issues flagged and hidden from the public</CardDescription>
+              <CardDescription>{t("admin.hiddenDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
               {hiddenLoading ? (
@@ -546,7 +550,7 @@ export default function AdminDashboard() {
                   ))}
                 </div>
               ) : (
-                <p className="text-center text-slate-400 py-8">No hidden issues</p>
+                <p className="text-center text-slate-400 py-8">{t("admin.noHidden")}</p>
               )}
             </CardContent>
           </Card>
@@ -556,10 +560,10 @@ export default function AdminDashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-amber-500" />
-                Live Issue Feed
-                {issues && <Badge variant="secondary" className="ml-2">{issues.length} issues</Badge>}
+                {t("admin.recentIssues")}
+                {issues && <Badge variant="secondary" className="ml-2">{issues.length} {t("dash.totalIssues")}</Badge>}
               </CardTitle>
-              <CardDescription>All reported civic issues from the database, newest first</CardDescription>
+              <CardDescription>{t("admin.recentDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
               {isIssuesLoading ? (
@@ -589,7 +593,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex flex-col items-end gap-3 min-w-[200px]">
                         <div className="flex flex-col items-end gap-1">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 mb-1">Status Management</span>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 mb-1">{t("admin.statusMgmt")}</span>
                           <div className="flex gap-1">
                             <Button 
                               size="sm" 
@@ -629,9 +633,9 @@ export default function AdminDashboard() {
                 </div>
               ) : (
                 <div className="text-center py-12 bg-slate-50 dark:bg-slate-800/50 rounded-xl border-2 border-dashed">
-                  <p className="text-slate-400 mb-2 font-medium">No issues match the selected filters.</p>
+                  <p className="text-slate-400 mb-2 font-medium">{t("admin.noMatch")}</p>
                   <Button variant="link" onClick={() => { setStatusFilter(undefined); setRiskFilter(undefined); }}>
-                    Clear all filters
+                    {t("admin.clearMatch")}
                   </Button>
                 </div>
               )}
@@ -642,37 +646,29 @@ export default function AdminDashboard() {
         {/* Quick Actions */}
         <Card className="mt-6 shadow-sm border-2 border-primary/10">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Quick Actions</CardTitle>
+            <CardTitle className="text-lg">{t("admin.quickActions")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Link href="/admin-dashboard/settings">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Link href="/admin/settings">
                 <Button variant="outline" className="w-full justify-start gap-3 h-12 hover:bg-primary/5 hover:text-primary hover:border-primary/30 transition-all">
                   <div className="bg-primary/10 p-1.5 rounded-md">⚙️</div>
                   <div className="flex flex-col items-start leading-tight">
-                    <span className="font-semibold">Admin Settings</span>
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">System Preferences</span>
+                    <span className="font-semibold">{t("admin.settings")}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">{t("admin.sysPref")}</span>
                   </div>
                 </Button>
               </Link>
               <Link href="/map">
                 <Button variant="outline" className="w-full justify-start gap-3 h-12">
                   <div className="bg-slate-100 p-1.5 rounded-md">🗺️</div>
-                  <span className="font-semibold">View Map</span>
+                  <span className="font-semibold">{t("admin.viewSysMap")}</span>
                 </Button>
               </Link>
-              <Link href="/submit">
-                <Button variant="outline" className="w-full justify-start gap-3 h-12">
-                  <div className="bg-slate-100 p-1.5 rounded-md">📝</div>
-                  <span className="font-semibold">Submit Issue</span>
-                </Button>
-              </Link>
-              <Link href="/dashboard">
-                <Button variant="outline" className="w-full justify-start gap-3 h-12">
-                  <div className="bg-slate-100 p-1.5 rounded-md">📊</div>
-                  <span className="font-semibold">User Dashboard</span>
-                </Button>
-              </Link>
+              <Button variant="outline" className="w-full justify-start gap-3 h-12" onClick={handleSyncAll} disabled={isSyncing}>
+                <div className="bg-slate-100 p-1.5 rounded-md">{isSyncing ? "⏳" : "🔄"}</div>
+                <span className="font-semibold">{isSyncing ? t("settings.syncing") : t("admin.syncDb")}</span>
+              </Button>
             </div>
           </CardContent>
         </Card>

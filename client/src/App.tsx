@@ -20,7 +20,7 @@ import { useLocation } from "wouter";
 
 function Layout() {
   const [location] = useLocation();
-  const isAdminRoute = location.startsWith("/admin-dashboard");
+  const isAdminRoute = location.startsWith("/admin-dashboard") || location.startsWith("/admin/");
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -41,7 +41,7 @@ function Router() {
       <Route path={"/issues/:id"} component={IssueDetail} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/admin-dashboard"} component={AdminDashboard} />
-      <Route path={"/admin-dashboard/settings"} component={AdminSettings} />
+      <Route path={"/admin/settings"} component={AdminSettings} />
       <Route path={"/signup"} component={SignUp} />
       <Route path={"/signin"} component={SignIn} />
       <Route path={"/settings"} component={Settings} />
