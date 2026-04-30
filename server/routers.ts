@@ -364,6 +364,32 @@ export const appRouter = router({
             console.error("[Notification] Failed to notify admin:", notifErr);
           }
 
+          // Trigger N8N Webhook for Email Notification
+          try {
+            const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+            if (n8nWebhookUrl) {
+              await fetch(n8nWebhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  event: "new_issue_published",
+                  targetEmail: "mohamedhosamm81@gmail.com",
+                  issue: newIssue,
+                  reporter: {
+                    id: ctx.user.id,
+                    name: ctx.user.name,
+                    email: ctx.user.email
+                  }
+                }),
+              });
+              console.log("[N8N] Webhook triggered successfully for new issue");
+            } else {
+              console.warn("[N8N] N8N_WEBHOOK_URL is not set. Cannot send notification.");
+            }
+          } catch (webhookError) {
+            console.error("[N8N] Failed to trigger webhook:", webhookError);
+          }
+
           return newIssue;
         } catch (error: any) {
           console.error("Failed to create issue:", error);
