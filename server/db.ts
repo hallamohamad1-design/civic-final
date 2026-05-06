@@ -148,6 +148,34 @@ export async function getDb() {
           await _pool.query("ALTER TABLE issues ADD COLUMN upvotes INT DEFAULT 0 NOT NULL");
           console.log("[Database] Added 'upvotes' column to issues.");
         }
+        if (!issueColNames.includes("severity_score")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN severity_score INT");
+          console.log("[Database] Added 'severity_score' column to civic_issues_v2.");
+        }
+        if (!issueColNames.includes("ai_summary")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN ai_summary TEXT");
+          console.log("[Database] Added 'ai_summary' column to civic_issues_v2.");
+        }
+        if (!issueColNames.includes("detected_hazards")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN detected_hazards TEXT");
+          console.log("[Database] Added 'detected_hazards' column to civic_issues_v2.");
+        }
+        if (!issueColNames.includes("recommended_action")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN recommended_action TEXT");
+          console.log("[Database] Added 'recommended_action' column to civic_issues_v2.");
+        }
+        if (!issueColNames.includes("estimated_urgency_hours")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN estimated_urgency_hours INT");
+          console.log("[Database] Added 'estimated_urgency_hours' column to civic_issues_v2.");
+        }
+        if (!issueColNames.includes("ai_confidence")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN ai_confidence TEXT");
+          console.log("[Database] Added 'ai_confidence' column to civic_issues_v2.");
+        }
+        if (!issueColNames.includes("analysis_timestamp")) {
+          await _pool.query("ALTER TABLE civic_issues_v2 ADD COLUMN analysis_timestamp TIMESTAMP NULL");
+          console.log("[Database] Added 'analysis_timestamp' column to civic_issues_v2.");
+        }
 
         // Create otp_codes table if it doesn't exist
         await _pool.query(`
