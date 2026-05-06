@@ -346,6 +346,33 @@ export const appRouter = router({
               location: input.address,
               timestamp: new Date().toISOString(),
             });
+
+            // Fire-and-forget: notify civicpulse-report n8n workflow
+            fetch("https://mariemsaleh.app.n8n.cloud/webhook/civicpulse-report", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                report_id:    String(newIssue.id),
+                user_id:      String(ctx.user.id),
+                user_email:   ctx.user.email || "",
+                title:        input.title,
+                description:  input.description,
+                location:     input.address,
+                image_url:    input.imageUrl || "",
+                submitted_at: new Date().toISOString(),
+              }),
+              signal: AbortSignal.timeout(15000),
+            })
+              .then((res) => {
+                if (res.ok) {
+                  console.log(`[CivicPulse Webhook] ✓ Report #${newIssue.id} sent (${res.status})`);
+                } else {
+                  console.error(`[CivicPulse Webhook] ✗ Returned ${res.status} for report #${newIssue.id}`);
+                }
+              })
+              .catch((err) => {
+                console.error(`[CivicPulse Webhook] ✗ Failed for report #${newIssue.id}:`, err.message || err);
+              });
           }
 
           // Notify Admin
