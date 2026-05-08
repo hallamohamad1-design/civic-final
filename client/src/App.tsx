@@ -15,6 +15,8 @@ import AdminSettings from "./pages/AdminSettings";
 import SignUp from "./pages/SignUp";
 import SignIn from "./pages/SignIn";
 import Settings from "./pages/Settings";
+import ComponentShowcase from "./pages/ComponentShowcase";
+import ChatPage from "./pages/ChatPage";
 import Navbar from "./components/Navbar";
 import { useLocation } from "wouter";
 
@@ -45,6 +47,8 @@ function Router() {
       <Route path={"/signup"} component={SignUp} />
       <Route path={"/signin"} component={SignIn} />
       <Route path={"/settings"} component={Settings} />
+      <Route path={"/chat"} component={ChatPage} />
+      <Route path={"/showcase"} component={ComponentShowcase} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
