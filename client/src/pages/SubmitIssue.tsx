@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,16 +29,21 @@ export default function SubmitIssue() {
   const [category, setCategory] = useState("Roads");
   const [severity, setSeverity] = useState<"low" | "medium" | "high">("medium");
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  // Ref to track the debounce timer so we can cancel it on each new keystroke
+  const aiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // AI Risk Assessment Logic
+  // AI Risk Assessment Logic — debounced so it only fires 600ms after typing stops
   const assessRisk = (text: string) => {
     if (!text) return;
+
+    // Cancel any pending timer from a previous keystroke
+    if (aiDebounceRef.current) clearTimeout(aiDebounceRef.current);
+
     setIsAiAnalyzing(true);
-    
-    // Simulate AI processing delay
-    setTimeout(() => {
+
+    aiDebounceRef.current = setTimeout(() => {
       const lowerText = text.toLowerCase();
-      
+
       const highRiskWords = ["fire", "explosion", "gas", "leak", "electricity", "collapsed", "blood", "hazard", "danger", "emergency", "fatal"];
       const mediumRiskWords = ["pothole", "broken", "noise", "dark", "trash", "smell", "flood", "crack"];
 
@@ -50,7 +55,7 @@ export default function SubmitIssue() {
         setSeverity("low");
       }
       setIsAiAnalyzing(false);
-    }, 800);
+    }, 600); // 600ms debounce — waits for the user to pause typing
   };
 
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -68,7 +73,7 @@ export default function SubmitIssue() {
 
   const createIssueMutation = trpc.issues.create.useMutation();
 
-  const categories = ["Roads", "Water", "Electricity", "Sanitation", "Other"];
+  const categories = ["Roads", "Water", "Electricity", "Sanitation", "Other"] as const;
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -356,11 +361,9 @@ export default function SubmitIssue() {
                       className="w-full rounded-xl border-slate-200 focus:ring-blue-500 h-12 px-3 text-sm bg-white"
                       required
                     >
-                      <option value="Roads">{t("submit.catRoads")}</option>
-                      <option value="Water">{t("submit.catWater")}</option>
-                      <option value="Electricity">{t("submit.catElectricity")}</option>
-                      <option value="Sanitation">{t("submit.catSanitation")}</option>
-                      <option value="Other">{t("submit.catOther")}</option>
+                      {categories.map((cat) => (
+                        <option key={cat} value={cat}>{t(`submit.cat${cat}`)}</option>
+                      ))}
                     </select>
                   </div>
 

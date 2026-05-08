@@ -140,6 +140,83 @@ export default function IssueDetail() {
         <div className="grid md:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="md:col-span-2 space-y-8">
+            {/* AI Analysis Results — shown once n8n has processed the report */}
+            {issue.aiSummary && (
+              <Card className="border-none bg-gradient-to-br from-blue-50 to-indigo-50 ring-1 ring-blue-100">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                    <h2 className="text-lg font-bold text-slate-900">AI Analysis</h2>
+                    {issue.aiConfidence && (
+                      <Badge className={`ml-auto text-[10px] font-bold border-none ${
+                        issue.aiConfidence === "high"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : issue.aiConfidence === "medium"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {issue.aiConfidence.toUpperCase()} CONFIDENCE
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Summary */}
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Summary</p>
+                      <p className="text-sm text-slate-700 leading-relaxed">{issue.aiSummary}</p>
+                    </div>
+
+                    {/* Recommended Action */}
+                    {issue.recommendedAction && (
+                      <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Recommended Action</p>
+                        <p className="text-sm text-slate-700 leading-relaxed">{issue.recommendedAction}</p>
+                      </div>
+                    )}
+
+                    {/* Urgency + Timestamp row */}
+                    <div className="flex flex-wrap gap-3">
+                      {issue.estimatedUrgencyHours != null && (
+                        <div className="bg-white rounded-xl px-4 py-3 shadow-sm flex-1 min-w-[120px]">
+                          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Est. Response Time</p>
+                          <p className="text-sm font-bold text-slate-800">
+                            {issue.estimatedUrgencyHours < 24
+                              ? `${issue.estimatedUrgencyHours}h`
+                              : `${Math.round(issue.estimatedUrgencyHours / 24)}d`}
+                          </p>
+                        </div>
+                      )}
+                      {issue.analysisTimestamp && (
+                        <div className="bg-white rounded-xl px-4 py-3 shadow-sm flex-1 min-w-[140px]">
+                          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Analyzed At</p>
+                          <p className="text-sm text-slate-600">
+                            {new Date(issue.analysisTimestamp).toLocaleString("en-US", {
+                              month: "short", day: "numeric",
+                              hour: "2-digit", minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Pending AI analysis indicator — shown before n8n has responded */}
+            {!issue.aiSummary && (
+              <Card className="border-none bg-slate-50 ring-1 ring-slate-100">
+                <CardContent className="p-5 flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700">AI Analysis Pending</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Our AI is reviewing this report. Results will appear here shortly.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Description */}
             <Card className="border-none bg-white overflow-hidden">
               <CardContent className="p-6">

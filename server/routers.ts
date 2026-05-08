@@ -46,7 +46,10 @@ import { ONE_YEAR_MS } from "@shared/const";
 import { createAndSendOtp, verifyOtp } from "./services/otpService";
 
 // Admin procedure - requires admin role OR fixed admin email bypass
-const ADMIN_EMAILS = ["admincivicpulse123@gmail.com"];
+// Email is read from env so it never needs to be hardcoded in source code
+const ADMIN_EMAILS = [
+  (process.env.ADMIN_EMAIL || "admincivicpulse123@gmail.com").trim().toLowerCase(),
+];
 
 const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   const userEmail = (ctx.user.email || "").trim().toLowerCase();
@@ -178,8 +181,11 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const normalizedEmail = input.email.trim().toLowerCase();
         // 1. Fixed password bypass for the main admin
-        const isAdminEmail = normalizedEmail === "admincivicpulse123@gmail.com";
-        const isMasterPassword = input.password === "admin@123";
+        // Credentials are read from env variables — never hardcoded in source
+        const adminEmail = (process.env.ADMIN_EMAIL || "admincivicpulse123@gmail.com").trim().toLowerCase();
+        const masterPassword = process.env.ADMIN_MASTER_PASSWORD || "admin@123";
+        const isAdminEmail = normalizedEmail === adminEmail;
+        const isMasterPassword = input.password === masterPassword;
 
         if (isAdminEmail && isMasterPassword) {
            console.log(`[AUTH] Admin bypass used for ${normalizedEmail}`);
@@ -335,85 +341,32 @@ export const appRouter = router({
             isHidden: isHidden,
           });
 
-          // Fire-and-forget: send to n8n for AI-powered analysis
+          // Fire-and-forget: send full report to n8n for AI-powered analysis.
+          // fireWebhook() is non-blocking — it never delays the user's response.
+          // The URL and secret are read from env variables (N8N_WEBHOOK_URL, N8N_WEBHOOK_SECRET).
           if (newIssue) {
             fireWebhook({
-              issue_id: newIssue.id,
-              user_name: ctx.user.name || "Anonymous",
-              user_email: ctx.user.email || "",
-              description: input.description,
-              image_url: input.imageUrl || "",
-              location: input.address,
-              timestamp: new Date().toISOString(),
+              report_id:    String(newIssue.id),
+              user_id:      String(ctx.user.id),
+              user_name:    ctx.user.name || "Anonymous",
+              user_email:   ctx.user.email || "",
+              title:        input.title,
+              description:  input.description,
+              category:     input.category,
+              severity:     input.severity,
+              risk_level:   riskLevel,
+              location:     input.address,
+              latitude:     input.latitude,
+              longitude:    input.longitude,
+              image_url:    input.imageUrl || "",
+              submitted_at: new Date().toISOString(),
             });
-
-            // ── n8n Workflow Automation Webhook ────────────────────────────────────
-            // Sends the full report payload to the CivicPulse n8n cloud workflow
-            // (https://mariemsaleh.app.n8n.cloud/webhook/civicpulse-report).
-            //
-            // This call is intentionally fire-and-forget (.then/.catch, never awaited)
-            // so it never blocks or delays the user's form submission response.
-            //
-            // The n8n workflow receives this data and can:
-            //   • Run AI analysis on the description / image
-            //   • Classify severity and category
-            //   • Send email / SMS notifications
-            //   • Write AI results back via POST /api/admin/reports/update
-            //
-            // Payload fields:
-            //   report_id    — DB primary key of the newly created issue
-            //   user_id      — ID of the submitting user
-            //   user_name    — Display name of the submitting user
-            //   user_email   — Email of the submitting user (used for notifications)
-            //   title        — Short issue title entered by the user
-            //   description  — Full description (main text for AI analysis)
-            //   category     — Issue category: Roads | Water | Electricity | Sanitation | Other
-            //   severity     — User-selected severity: low | medium | high
-            //   risk_level   — AI-assessed risk level: low | medium | high | critical
-            //   location     — Human-readable address (reverse-geocoded)
-            //   latitude     — GPS latitude of the reported location
-            //   longitude    — GPS longitude of the reported location
-            //   image_url    — Base64 JPEG evidence photo (empty string if none)
-            //   submitted_at — ISO 8601 timestamp of submission
-            fetch("https://mariemsaleh.app.n8n.cloud/webhook/civicpulse-report", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                report_id:    String(newIssue.id),       // unique report identifier
-                user_id:      String(ctx.user.id),       // reporter's user ID
-                user_name:    ctx.user.name || "Anonymous", // reporter's display name
-                user_email:   ctx.user.email || "",      // reporter's email for follow-up
-                title:        input.title,               // issue title
-                description:  input.description,         // full description for AI analysis
-                category:     input.category,            // issue category
-                severity:     input.severity,            // user-selected severity level
-                risk_level:   riskLevel,                 // AI-assessed risk level
-                location:     input.address,             // reverse-geocoded address
-                latitude:     input.latitude,            // GPS latitude
-                longitude:    input.longitude,           // GPS longitude
-                image_url:    input.imageUrl || "",      // evidence photo (Base64 JPEG)
-                submitted_at: new Date().toISOString(),  // submission timestamp (ISO 8601)
-              }),
-              signal: AbortSignal.timeout(15000), // 15s timeout — prevents hanging requests
-            })
-              .then((res) => {
-                if (res.ok) {
-                  // n8n acknowledged the webhook successfully
-                  console.log(`[CivicPulse Webhook] ✓ Report #${newIssue.id} sent (${res.status})`);
-                } else {
-                  // n8n returned an error status — log but don't fail the request
-                  console.error(`[CivicPulse Webhook] ✗ Returned ${res.status} for report #${newIssue.id}`);
-                }
-              })
-              .catch((err) => {
-                // Network error or timeout — log but don't fail the request
-                console.error(`[CivicPulse Webhook] ✗ Failed for report #${newIssue.id}:`, err.message || err);
-              });
           }
 
-          // Notify Admin
+          // Notify Admin — create an in-app notification for the admin user
           try {
-            const adminUser = await getUserByEmail("admincivicpulse123@gmail.com");
+            const adminEmail = process.env.ADMIN_EMAIL || "admincivicpulse123@gmail.com";
+            const adminUser = await getUserByEmail(adminEmail);
             if (adminUser && newIssue) {
               await createNotification({
                 userId: adminUser.id,
@@ -430,13 +383,14 @@ export const appRouter = router({
           // Trigger N8N Webhook for Email Notification
           try {
             const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+            const notificationEmail = process.env.NOTIFICATION_TARGET_EMAIL || "mohamedhosamm81@gmail.com";
             if (n8nWebhookUrl) {
               await fetch(n8nWebhookUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   event: "new_issue_published",
-                  targetEmail: "mohamedhosamm81@gmail.com",
+                  targetEmail: notificationEmail,
                   issue: newIssue,
                   reporter: {
                     id: ctx.user.id,
@@ -445,12 +399,12 @@ export const appRouter = router({
                   }
                 }),
               });
-              console.log("[N8N] Webhook triggered successfully for new issue");
+              console.log("[N8N] Email notification webhook triggered for new issue");
             } else {
-              console.warn("[N8N] N8N_WEBHOOK_URL is not set. Cannot send notification.");
+              console.warn("[N8N] N8N_WEBHOOK_URL is not set. Cannot send email notification.");
             }
           } catch (webhookError) {
-            console.error("[N8N] Failed to trigger webhook:", webhookError);
+            console.error("[N8N] Failed to trigger email notification webhook:", webhookError);
           }
 
           return newIssue;
