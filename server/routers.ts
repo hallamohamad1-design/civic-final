@@ -347,30 +347,66 @@ export const appRouter = router({
               timestamp: new Date().toISOString(),
             });
 
-            // Fire-and-forget: notify civicpulse-report n8n workflow
+            // ── n8n Workflow Automation Webhook ────────────────────────────────────
+            // Sends the full report payload to the CivicPulse n8n cloud workflow
+            // (https://mariemsaleh.app.n8n.cloud/webhook/civicpulse-report).
+            //
+            // This call is intentionally fire-and-forget (.then/.catch, never awaited)
+            // so it never blocks or delays the user's form submission response.
+            //
+            // The n8n workflow receives this data and can:
+            //   • Run AI analysis on the description / image
+            //   • Classify severity and category
+            //   • Send email / SMS notifications
+            //   • Write AI results back via POST /api/admin/reports/update
+            //
+            // Payload fields:
+            //   report_id    — DB primary key of the newly created issue
+            //   user_id      — ID of the submitting user
+            //   user_name    — Display name of the submitting user
+            //   user_email   — Email of the submitting user (used for notifications)
+            //   title        — Short issue title entered by the user
+            //   description  — Full description (main text for AI analysis)
+            //   category     — Issue category: Roads | Water | Electricity | Sanitation | Other
+            //   severity     — User-selected severity: low | medium | high
+            //   risk_level   — AI-assessed risk level: low | medium | high | critical
+            //   location     — Human-readable address (reverse-geocoded)
+            //   latitude     — GPS latitude of the reported location
+            //   longitude    — GPS longitude of the reported location
+            //   image_url    — Base64 JPEG evidence photo (empty string if none)
+            //   submitted_at — ISO 8601 timestamp of submission
             fetch("https://mariemsaleh.app.n8n.cloud/webhook/civicpulse-report", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                report_id:    String(newIssue.id),
-                user_id:      String(ctx.user.id),
-                user_email:   ctx.user.email || "",
-                title:        input.title,
-                description:  input.description,
-                location:     input.address,
-                image_url:    input.imageUrl || "",
-                submitted_at: new Date().toISOString(),
+                report_id:    String(newIssue.id),       // unique report identifier
+                user_id:      String(ctx.user.id),       // reporter's user ID
+                user_name:    ctx.user.name || "Anonymous", // reporter's display name
+                user_email:   ctx.user.email || "",      // reporter's email for follow-up
+                title:        input.title,               // issue title
+                description:  input.description,         // full description for AI analysis
+                category:     input.category,            // issue category
+                severity:     input.severity,            // user-selected severity level
+                risk_level:   riskLevel,                 // AI-assessed risk level
+                location:     input.address,             // reverse-geocoded address
+                latitude:     input.latitude,            // GPS latitude
+                longitude:    input.longitude,           // GPS longitude
+                image_url:    input.imageUrl || "",      // evidence photo (Base64 JPEG)
+                submitted_at: new Date().toISOString(),  // submission timestamp (ISO 8601)
               }),
-              signal: AbortSignal.timeout(15000),
+              signal: AbortSignal.timeout(15000), // 15s timeout — prevents hanging requests
             })
               .then((res) => {
                 if (res.ok) {
+                  // n8n acknowledged the webhook successfully
                   console.log(`[CivicPulse Webhook] ✓ Report #${newIssue.id} sent (${res.status})`);
                 } else {
+                  // n8n returned an error status — log but don't fail the request
                   console.error(`[CivicPulse Webhook] ✗ Returned ${res.status} for report #${newIssue.id}`);
                 }
               })
               .catch((err) => {
+                // Network error or timeout — log but don't fail the request
                 console.error(`[CivicPulse Webhook] ✗ Failed for report #${newIssue.id}:`, err.message || err);
               });
           }
