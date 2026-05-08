@@ -49,6 +49,14 @@ export const issues = mysqlTable("civic_issues_v2", {
   imageUrl: longtext("imageUrl"),
   upvotes: int("upvotes").default(0).notNull(),
   resolutionRating: int("resolutionRating"),
+  // AI analysis columns — populated by n8n / external AI pipeline
+  severityScore:         int("severity_score"),
+  aiSummary:             text("ai_summary"),
+  detectedHazards:       text("detected_hazards"),       // stored as JSON string
+  recommendedAction:     text("recommended_action"),
+  estimatedUrgencyHours: int("estimated_urgency_hours"),
+  aiConfidence:          text("ai_confidence"),           // high | medium | low
+  analysisTimestamp:     timestamp("analysis_timestamp"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
