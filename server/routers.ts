@@ -594,10 +594,14 @@ export const appRouter = router({
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
         try {
-          // Use geocode.maps.co as a free, more reliable alternative to official Nominatim
+          // Use official Nominatim with proper User-Agent to avoid 403/429 limits
           const response = await fetch(
-            `https://geocode.maps.co/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
+            `https://nominatim.openstreetmap.org/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
             {
+              headers: {
+                "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
+                "Accept-Language": "en"
+              },
               signal: controller.signal,
             }
           );
@@ -620,8 +624,14 @@ export const appRouter = router({
 
         try {
           const response = await fetch(
-            `https://geocode.maps.co/search?q=${encodeURIComponent(input.query)}`,
-            { signal: controller.signal }
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(input.query)}&format=json`,
+            { 
+              headers: {
+                "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
+                "Accept-Language": "en"
+              },
+              signal: controller.signal 
+            }
           );
           clearTimeout(timeoutId);
           if (!response.ok) throw new Error("Search service unavailable");
