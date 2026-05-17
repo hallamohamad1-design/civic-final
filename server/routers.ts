@@ -4,6 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { fireWebhook } from "./services/webhookService";
 import {
   getIssues,
   getIssueById,
@@ -20,11 +21,17 @@ import {
   hideIssue,
   unhideIssue,
   getHiddenIssues,
+  getAdminAllIssues,
   upsertUser,
   updateUserSettings,
   getUserByEmail,
   getDb,
   rateIssueResolution,
+  updateIssueStatus,
+  getNotifications,
+  markNotificationAsRead,
+  clearAllNotifications,
+  createNotification,
 } from "./db";
 import { issues, users } from "../drizzle/schema";
 import { eq, sql, and, gte } from "drizzle-orm";
@@ -38,18 +45,48 @@ import { sdk } from "./_core/sdk";
 import { ONE_YEAR_MS } from "@shared/const";
 import { createAndSendOtp, verifyOtp } from "./services/otpService";
 
-// Admin procedure - requires admin role
-const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin") {
+// Admin procedure - requires admin role OR fixed admin email bypass
+const ADMIN_EMAILS = ["admincivicpulse123@gmail.com"];
+
+const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const userEmail = (ctx.user.email || "").trim().toLowerCase();
+  const isAdminByRole = ctx.user.role === "admin";
+  const isAdminByEmail = ADMIN_EMAILS.includes(userEmail);
+
+  if (!isAdminByRole && !isAdminByEmail) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
   }
+
+  // If admin by email but DB role is wrong, auto-fix it
+  if (isAdminByEmail && !isAdminByRole) {
+    console.log(`[Admin] Auto-fixing role for ${userEmail} (was: ${ctx.user.role})`);
+    try {
+      await upsertUser({
+        openId: ctx.user.openId,
+        email: userEmail,
+        role: "admin",
+      });
+    } catch (e) {
+      console.error("[Admin] Failed to auto-fix role:", e);
+    }
+  }
+
   return next({ ctx });
 });
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(opts => {
+      const user = opts.ctx.user;
+      if (!user) return null;
+      // Ensure the fixed admin always gets role: "admin" on the frontend
+      const userEmail = (user.email || "").trim().toLowerCase();
+      if (ADMIN_EMAILS.includes(userEmail) && user.role !== "admin") {
+        return { ...user, role: "admin" as const };
+      }
+      return user;
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -225,7 +262,7 @@ export const appRouter = router({
 
   issues: router({
     list: publicProcedure
-      .input(z.object({ limit: z.number().min(1).max(100).default(50), offset: z.number().min(0).default(0) }).partial())
+      .input(z.object({ limit: z.number().min(1).max(500).default(50), offset: z.number().min(0).default(0) }).partial())
       .query(async ({ input }) => {
         return await getIssues(input.limit ?? 50, input.offset ?? 0);
       }),
@@ -284,7 +321,7 @@ export const appRouter = router({
             // Otherwise, keep default riskLevel and isHidden
           }
 
-          return await createIssue({
+          const newIssue = await createIssue({
             userId: ctx.user.id,
             title: input.title,
             description: input.description,
@@ -297,6 +334,90 @@ export const appRouter = router({
             riskLevel: riskLevel,
             isHidden: isHidden,
           });
+
+          // Fire-and-forget: send to n8n for AI-powered analysis
+          if (newIssue) {
+            fireWebhook({
+              issue_id: newIssue.id,
+              user_name: ctx.user.name || "Anonymous",
+              user_email: ctx.user.email || "",
+              description: input.description,
+              image_url: input.imageUrl || "",
+              location: input.address,
+              timestamp: new Date().toISOString(),
+            });
+
+            // Fire-and-forget: notify civicpulse-report n8n workflow
+            fetch("https://mariemsaleh.app.n8n.cloud/webhook/civicpulse-report", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                report_id:    String(newIssue.id),
+                user_id:      String(ctx.user.id),
+                user_email:   ctx.user.email || "",
+                title:        input.title,
+                description:  input.description,
+                location:     input.address,
+                image_url:    input.imageUrl || "",
+                submitted_at: new Date().toISOString(),
+              }),
+              signal: AbortSignal.timeout(15000),
+            })
+              .then((res) => {
+                if (res.ok) {
+                  console.log(`[CivicPulse Webhook] ✓ Report #${newIssue.id} sent (${res.status})`);
+                } else {
+                  console.error(`[CivicPulse Webhook] ✗ Returned ${res.status} for report #${newIssue.id}`);
+                }
+              })
+              .catch((err) => {
+                console.error(`[CivicPulse Webhook] ✗ Failed for report #${newIssue.id}:`, err.message || err);
+              });
+          }
+
+          // Notify Admin
+          try {
+            const adminUser = await getUserByEmail("admincivicpulse123@gmail.com");
+            if (adminUser && newIssue) {
+              await createNotification({
+                userId: adminUser.id,
+                issueId: newIssue.id,
+                title: "New Issue Reported",
+                message: `New Issue Reported: ${input.category} by ${ctx.user.name || 'User'}`,
+                type: "new_issue"
+              });
+            }
+          } catch (notifErr) {
+            console.error("[Notification] Failed to notify admin:", notifErr);
+          }
+
+          // Trigger N8N Webhook for Email Notification
+          try {
+            const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+            if (n8nWebhookUrl) {
+              await fetch(n8nWebhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  event: "new_issue_published",
+                  targetEmail: "mohamedhosamm81@gmail.com",
+                  issue: newIssue,
+                  reporter: {
+                    id: ctx.user.id,
+                    name: ctx.user.name,
+                    email: ctx.user.email
+                  }
+                }),
+              });
+              console.log("[N8N] Webhook triggered successfully for new issue");
+            } else {
+              console.warn("[N8N] N8N_WEBHOOK_URL is not set. Cannot send notification.");
+            }
+          } catch (webhookError) {
+            console.error("[N8N] Failed to trigger webhook:", webhookError);
+          }
+
+          return newIssue;
         } catch (error: any) {
           // Log full error to server console for debugging
           console.error("[ISSUES:CREATE] Detailed Error:", error);
@@ -371,6 +492,9 @@ export const appRouter = router({
     upvote: protectedProcedure
       .input(z.number())
       .mutation(async ({ input, ctx }) => {
+        const issue = await getIssueById(input);
+        if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+        
         const hasVoted = await hasUserVoted(ctx.user.id, input);
         if (hasVoted) throw new TRPCError({ code: "BAD_REQUEST", message: "Already voted" });
         return await addUserVote(ctx.user.id, input);
@@ -381,6 +505,14 @@ export const appRouter = router({
     getHiddenIssues: adminProcedure
       .input(z.object({ limit: z.number().min(1).max(100).default(50), offset: z.number().min(0).default(0) }).partial())
       .query(async () => await getHiddenIssues(50, 0)),
+
+    getAllIssues: adminProcedure
+      .input(z.object({ status: z.string().optional(), riskLevel: z.string().optional() }).optional())
+      .query(async ({ input }) => await getAdminAllIssues(input)),
+
+    updateStatus: adminProcedure
+      .input(z.object({ issueId: z.number(), status: z.enum(["open", "in-progress", "resolved"]) }))
+      .mutation(async ({ input }) => await updateIssueStatus(input.issueId, input.status)),
 
     hideIssue: adminProcedure
       .input(z.number())
@@ -393,6 +525,12 @@ export const appRouter = router({
     updateRiskLevel: adminProcedure
       .input(z.object({ issueId: z.number(), riskLevel: z.enum(["low", "medium", "high", "critical"]) }))
       .mutation(async ({ input }) => await updateIssueRiskLevel(input.issueId, input.riskLevel)),
+
+    listAll: adminProcedure
+      .input(z.object({ status: z.string().optional(), riskLevel: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        return await getAdminAllIssues(input);
+      }),
 
     getStats: adminProcedure.query(async () => {
       const db = await getDb();
@@ -469,12 +607,13 @@ export const appRouter = router({
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
         try {
+          // Use official Nominatim with proper User-Agent to avoid 403/429 limits
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${input.lat}&lon=${input.lng}&zoom=18&addressdetails=1`,
+            `https://nominatim.openstreetmap.org/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
             {
               headers: {
-                "User-Agent": "CivicPulse/1.1 (Contact: hallamohamad1@gmail.com; Web: civicpulse.app)",
-                "Accept-Language": "en,ar",
+                "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
+                "Accept-Language": "en"
               },
               signal: controller.signal,
             }
@@ -490,6 +629,46 @@ export const appRouter = router({
           return { address: "Location identified by coordinates (Service busy)" };
         }
       }),
+    forwardGeocode: publicProcedure
+      .input(z.object({ query: z.string() }))
+      .query(async ({ input }) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(input.query)}&format=json`,
+            { 
+              headers: {
+                "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
+                "Accept-Language": "en"
+              },
+              signal: controller.signal 
+            }
+          );
+          clearTimeout(timeoutId);
+          if (!response.ok) throw new Error("Search service unavailable");
+          const data = await response.json();
+          return data.map((item: any) => ({
+            display_name: item.display_name,
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+          }));
+        } catch (error) {
+          clearTimeout(timeoutId);
+          console.error("[Forward Geocoding Error]", error);
+          return [];
+        }
+      }),
+  }),
+  notifications: router({
+    list: protectedProcedure
+      .query(async ({ ctx }) => await getNotifications(ctx.user.id)),
+    markAsRead: protectedProcedure
+      .input(z.number())
+      .mutation(async ({ input }) => await markNotificationAsRead(input)),
+    clearAll: protectedProcedure
+      .mutation(async ({ ctx }) => await clearAllNotifications(ctx.user.id)),
   }),
 });
 

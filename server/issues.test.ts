@@ -14,6 +14,8 @@ vi.mock("./db", () => ({
       category: "Roads",
       status: "open",
       severity: "high",
+      riskLevel: "medium",
+      isHidden: 0,
       address: "123 Main St",
       latitude: "40.7128",
       longitude: "-74.0060",
@@ -32,6 +34,8 @@ vi.mock("./db", () => ({
         category: "Roads",
         status: "open",
         severity: "high",
+        riskLevel: "medium",
+        isHidden: 0,
         address: "123 Main St",
         latitude: "40.7128",
         longitude: "-74.0060",
@@ -53,6 +57,8 @@ vi.mock("./db", () => ({
           category: "Roads",
           status: "open",
           severity: "high",
+          riskLevel: "medium",
+          isHidden: 0,
           address: "123 Main St",
           latitude: "40.7128",
           longitude: "-74.0060",
@@ -67,6 +73,11 @@ vi.mock("./db", () => ({
   getIssueCount: vi.fn(async () => 1),
   createIssue: vi.fn(async (data) => ({
     id: 2,
+    userId: 1,
+    status: "open",
+    upvotes: 0,
+    riskLevel: "medium",
+    isHidden: 0,
     ...data,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -79,6 +90,8 @@ vi.mock("./db", () => ({
     category: "Roads",
     status: "in-progress",
     severity: "high",
+    riskLevel: "medium",
+    isHidden: 0,
     address: "123 Main St",
     latitude: "40.7128",
     longitude: "-74.0060",
@@ -96,6 +109,8 @@ vi.mock("./db", () => ({
     category: "Roads",
     status: "open",
     severity: "high",
+    riskLevel: "medium",
+    isHidden: 0,
     address: "123 Main St",
     latitude: "40.7128",
     longitude: "-74.0060",
@@ -112,6 +127,8 @@ vi.mock("./db", () => ({
     category: "Roads",
     status: "open",
     severity: "high",
+    riskLevel: "medium",
+    isHidden: 0,
     address: "123 Main St",
     latitude: "40.7128",
     longitude: "-74.0060",
@@ -133,6 +150,10 @@ function createAuthContext(userId: number = 1, role: "user" | "admin" = "user"):
     createdAt: new Date(),
     updatedAt: new Date(),
     lastSignedIn: new Date(),
+    language: "en",
+    theme: "light",
+    notificationSettings: '{"statusChanges":true,"newComments":true,"emailDigest":true}',
+    password: null,
   };
 
   return {
@@ -186,8 +207,8 @@ describe("issues router", () => {
       const result = await caller.issues.getById(1);
 
       expect(result).toBeDefined();
-      expect(result.id).toBe(1);
-      expect(result.title).toBe("Pothole on Main Street");
+      expect(result!.id).toBe(1);
+      expect(result!.title).toBe("Pothole on Main Street");
     });
 
     it("throws NOT_FOUND when issue does not exist", async () => {
@@ -251,9 +272,9 @@ describe("issues router", () => {
       });
 
       expect(result).toBeDefined();
-      expect(result.id).toBe(2);
-      expect(result.title).toBe("New Pothole");
-      expect(result.userId).toBe(1);
+      expect(result!.id).toBe(2);
+      expect(result!.title).toBe("New Pothole");
+      expect(result!.userId).toBe(1);
     });
 
     it("validates required fields", async () => {
@@ -334,7 +355,7 @@ describe("issues router", () => {
       });
 
       expect(result).toBeDefined();
-      expect(result.title).toBe("Updated Pothole");
+      expect(result!.title).toBe("Updated Pothole");
     });
   });
 
@@ -405,7 +426,7 @@ describe("issues router", () => {
       try {
         const result = await caller.issues.upvote(1);
         expect(result).toBeDefined();
-        expect(result.upvotes).toBeGreaterThan(0);
+        expect(result!.upvotes).toBeGreaterThan(0);
       } catch (error: any) {
         // If issue doesn't exist, that's OK for this test
         if (error.code !== "NOT_FOUND") {

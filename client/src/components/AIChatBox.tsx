@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, User, Sparkles } from "lucide-react";
+import { Loader2, Send, User, Sparkles, Upload, MessageCircle, HelpCircle } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 
@@ -13,6 +13,11 @@ export type Message = {
   role: "system" | "user" | "assistant";
   content: string;
 };
+
+/**
+ * Chat mode type
+ */
+export type ChatMode = "photo" | "problem" | "help" | null;
 
 export type AIChatBoxProps = {
   /**
@@ -26,6 +31,11 @@ export type AIChatBoxProps = {
    * Typically you'll call a tRPC mutation here to invoke the LLM.
    */
   onSendMessage: (content: string) => void;
+
+  /**
+   * Callback when user uploads a photo for analysis
+   */
+  onPhotoUpload?: (file: File) => void;
 
   /**
    * Whether the AI is currently generating a response
@@ -113,6 +123,7 @@ export type AIChatBoxProps = {
 export function AIChatBox({
   messages,
   onSendMessage,
+  onPhotoUpload,
   isLoading = false,
   placeholder = "Type your message...",
   className,
@@ -121,10 +132,12 @@ export function AIChatBox({
   suggestedPrompts,
 }: AIChatBoxProps) {
   const [input, setInput] = useState("");
+  const [chatMode, setChatMode] = useState<ChatMode>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter out system messages
   const displayMessages = messages.filter((msg) => msg.role !== "system");
@@ -187,6 +200,42 @@ export function AIChatBox({
     }
   };
 
+  const handlePhotoUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onPhotoUpload) {
+      setChatMode("photo");
+      onPhotoUpload(file);
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleModeSelect = (mode: ChatMode) => {
+    setChatMode(mode);
+    if (messages.length === 0) {
+      // Send initial context message for the selected mode
+      const modeMessages: Record<Exclude<ChatMode, null>, string> = {
+        photo: "I'm ready to analyze a photo. Please upload an image for me to analyze and provide a report.",
+        problem: "I'm ready to help with problem descriptions. Please describe the civic issue you observed and I'll provide suggestions.",
+        help: "I'm here to help with website issues. What problem are you facing with CivicPulse?",
+      };
+      onSendMessage(modeMessages[mode]);
+    }
+  };
+
+  const getModeInstructions = (): string => {
+    const instructions: Record<Exclude<ChatMode, null>, string> = {
+      photo: "Upload a photo or describe what you see...",
+      problem: "Describe the civic problem you observed...",
+      help: "What issue are you facing with the website?",
+    };
+    return chatMode && chatMode in instructions ? instructions[chatMode] : placeholder;
+  };
+
   return (
     <div
       ref={containerRef}
@@ -200,11 +249,54 @@ export function AIChatBox({
       <div ref={scrollAreaRef} className="flex-1 overflow-hidden">
         {displayMessages.length === 0 ? (
           <div className="flex h-full flex-col p-4">
-            <div className="flex flex-1 flex-col items-center justify-center gap-6 text-muted-foreground">
+            <div className="flex flex-1 flex-col items-center justify-center gap-8 text-muted-foreground">
               <div className="flex flex-col items-center gap-3">
                 <Sparkles className="size-12 opacity-20" />
                 <p className="text-sm">{emptyStateMessage}</p>
               </div>
+
+              {/* Three Choice Buttons */}
+              {chatMode === null && (
+                <div className="flex flex-col gap-3 w-full max-w-md">
+                  <p className="text-xs text-center text-muted-foreground mb-2">Select how you'd like to interact:</p>
+                  
+                  <button
+                    onClick={() => handleModeSelect("photo")}
+                    disabled={isLoading}
+                    className="flex items-center gap-3 w-full rounded-lg border-2 border-border p-4 transition-all hover:border-primary hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Upload className="size-6 text-primary" />
+                    <div className="text-left">
+                      <p className="font-semibold text-foreground text-sm">Upload Photo</p>
+                      <p className="text-xs text-muted-foreground">Analyze civic issue photos and get reports</p>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => handleModeSelect("problem")}
+                    disabled={isLoading}
+                    className="flex items-center gap-3 w-full rounded-lg border-2 border-border p-4 transition-all hover:border-primary hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <MessageCircle className="size-6 text-primary" />
+                    <div className="text-left">
+                      <p className="font-semibold text-foreground text-sm">Describe Problem</p>
+                      <p className="text-xs text-muted-foreground">Write descriptions and get AI suggestions</p>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => handleModeSelect("help")}
+                    disabled={isLoading}
+                    className="flex items-center gap-3 w-full rounded-lg border-2 border-border p-4 transition-all hover:border-primary hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <HelpCircle className="size-6 text-primary" />
+                    <div className="text-left">
+                      <p className="font-semibold text-foreground text-sm">Get Website Help</p>
+                      <p className="text-xs text-muted-foreground">Get answers for website issues</p>
+                    </div>
+                  </button>
+                </div>
+              )}
 
               {suggestedPrompts && suggestedPrompts.length > 0 && (
                 <div className="flex max-w-2xl flex-wrap justify-center gap-2">
@@ -308,12 +400,35 @@ export function AIChatBox({
         onSubmit={handleSubmit}
         className="flex gap-2 p-4 border-t bg-background/50 items-end"
       >
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handlePhotoSelect}
+          className="hidden"
+        />
+
+        {/* Photo upload button - visible in photo mode */}
+        {chatMode === "photo" && (
+          <Button
+            type="button"
+            size="icon"
+            onClick={handlePhotoUploadClick}
+            disabled={isLoading}
+            title="Upload photo for analysis"
+            className="shrink-0 h-[38px] w-[38px]"
+          >
+            <Upload className="size-4" />
+          </Button>
+        )}
+
         <Textarea
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={getModeInstructions()}
           className="flex-1 max-h-32 resize-none min-h-9"
           rows={1}
         />

@@ -1,7 +1,7 @@
-import { eq, sql, and, lt } from "drizzle-orm";
+import { eq, sql, and, lt, desc } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, issues, InsertIssue, issueImages, userVotes, otpCodes } from "../drizzle/schema";
+import { InsertUser, users, issues, InsertIssue, issueImages, userVotes, otpCodes, notifications, InsertNotification } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -52,28 +52,101 @@ export async function getDb() {
       // AUTO-MIGRATION CHECK: Add missing columns or update lengths if they don't exist
       try {
         console.log("[Database] Running auto-migration check...");
-        const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM issues");
+        // Ensure the new table exists with the correct structure
+        await _pool.query(`
+          CREATE TABLE IF NOT EXISTS civic_issues_v2 (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            userId INT NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            category VARCHAR(64) NOT NULL,
+            status ENUM('open', 'in-progress', 'resolved') DEFAULT 'open' NOT NULL,
+            severity ENUM('low', 'medium', 'high') DEFAULT 'medium' NOT NULL,
+            riskLevel ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium' NOT NULL,
+            isHidden INT DEFAULT 0 NOT NULL,
+            address VARCHAR(512) NOT NULL,
+            latitude VARCHAR(64) NOT NULL,
+            longitude VARCHAR(64) NOT NULL,
+            imageUrl LONGTEXT,
+            upvotes INT DEFAULT 0 NOT NULL,
+            resolutionRating INT DEFAULT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL
+          )
+        `);
+
+        const [issuesColumns] = await _pool.query("SHOW COLUMNS FROM civic_issues_v2");
         const issuesColDetails = (issuesColumns as any[]);
         const issueColNames = issuesColDetails.map(c => c.Field);
         
         // Helper to add column if missing
         const ensureColumn = async (name: string, definition: string) => {
           if (!issueColNames.includes(name)) {
-            console.log(`[Database] Adding missing column 'issues.${name}'...`);
-            await _pool!.query(`ALTER TABLE issues ADD COLUMN ${name} ${definition}`);
+            console.log(`[Database] Adding missing column 'civic_issues_v2.${name}'...`);
+            await _pool!.query(`ALTER TABLE civic_issues_v2 ADD COLUMN ${name} ${definition}`);
           }
         };
 
         // Ensure address length
         const addressCol = issuesColDetails.find(c => c.Field === 'address');
         if (addressCol && addressCol.Type.includes('varchar(255)')) {
-          await _pool.query("ALTER TABLE issues MODIFY COLUMN address VARCHAR(512) NOT NULL");
+          await _pool.query("ALTER TABLE civic_issues_v2 MODIFY COLUMN address VARCHAR(512) NOT NULL");
+        }
+
+        // ONE-TIME DATA MIGRATION: Copy from old 'issues' table if it exists
+        try {
+          const [oldTableCheck]: any = await _pool.query("SHOW TABLES LIKE 'issues'");
+          if (oldTableCheck.length > 0) {
+            console.log("[Database] Legacy 'issues' table found. Checking for data to migrate...");
+            const [oldData]: any = await _pool.query("SELECT * FROM issues");
+            if (oldData.length > 0) {
+              console.log(`[Database] Migrating ${oldData.length} records to civic_issues_v2...`);
+              for (const row of oldData) {
+                // Check if already exists in new table to avoid duplicates
+                const [exists]: any = await _pool.query("SELECT id FROM civic_issues_v2 WHERE id = ?", [row.id]);
+                if (exists.length === 0) {
+                  const cols = Object.keys(row).join(", ");
+                  const placeholders = Object.keys(row).map(() => "?").join(", ");
+                  const vals = Object.values(row);
+                  await _pool.query(`INSERT INTO civic_issues_v2 (${cols}) VALUES (${placeholders})`, vals);
+                }
+              }
+              console.log("[Database] Migration completed successfully.");
+              // Optional: rename old table to keep as backup
+              await _pool.query("RENAME TABLE issues TO issues_backup_" + Date.now());
+            }
+          }
+        } catch (migrationError) {
+          console.error("[Database] Migration failed (likely already done or tables mismatch):", migrationError);
         }
 
         // Ensure imageUrl type
         const imageUrlCol = issuesColDetails.find(c => c.Field === 'imageUrl');
         if (imageUrlCol && !imageUrlCol.Type.includes('longtext')) {
-          await _pool.query("ALTER TABLE issues MODIFY COLUMN imageUrl LONGTEXT");
+          await _pool.query("ALTER TABLE civic_issues_v2 MODIFY COLUMN imageUrl LONGTEXT");
+        }
+
+        // Users auto-migration
+        const [usersColumns] = await _pool.query("SHOW COLUMNS FROM users");
+        const userColNames = (usersColumns as any[]).map(c => c.Field);
+        
+        if (!userColNames.includes("language")) {
+          await _pool.query("ALTER TABLE users ADD COLUMN language VARCHAR(10) DEFAULT 'en' NOT NULL");
+          console.log("[Database] Added 'language' column.");
+        }
+        if (!userColNames.includes("theme")) {
+          await _pool.query("ALTER TABLE users ADD COLUMN theme VARCHAR(20) DEFAULT 'light' NOT NULL");
+          console.log("[Database] Added 'theme' column.");
+        }
+        if (!userColNames.includes("notificationSettings")) {
+          await _pool.query("ALTER TABLE users ADD COLUMN notificationSettings TEXT");
+          // Initialize with default JSON
+          await _pool.query("UPDATE users SET notificationSettings = '{\"statusChanges\":true,\"newComments\":true,\"emailDigest\":true}' WHERE notificationSettings IS NULL");
+          console.log("[Database] Added 'notificationSettings' column.");
+        }
+        if (!userColNames.includes("password")) {
+          await _pool.query("ALTER TABLE users ADD COLUMN password TEXT");
+          console.log("[Database] Added 'password' column.");
         }
 
         // Add all potential missing columns
@@ -83,6 +156,28 @@ export async function getDb() {
         await ensureColumn("isHidden", "INT DEFAULT 0 NOT NULL");
         await ensureColumn("upvotes", "INT DEFAULT 0 NOT NULL");
         await ensureColumn("resolutionRating", "INT DEFAULT NULL");
+        
+        // AI columns
+        await ensureColumn("severity_score", "INT");
+        await ensureColumn("ai_summary", "TEXT");
+        await ensureColumn("detected_hazards", "TEXT");
+        await ensureColumn("recommended_action", "TEXT");
+        await ensureColumn("estimated_urgency_hours", "INT");
+        await ensureColumn("ai_confidence", "TEXT");
+        await ensureColumn("analysis_timestamp", "TIMESTAMP NULL");
+
+        // Create otp_codes table if it doesn't exist
+        await _pool.query(`
+          CREATE TABLE IF NOT EXISTS otp_codes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            email VARCHAR(320) NOT NULL,
+            code VARCHAR(6) NOT NULL,
+            expiresAt TIMESTAMP NOT NULL,
+            isUsed INT DEFAULT 0 NOT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+          )
+        `);
+        console.log("[Database] Ensured 'otp_codes' table exists.");
 
         console.log("[Database] Schema check completed.");
       } catch (migrateError) {
@@ -207,11 +302,11 @@ export async function getIssues(limit: number = 50, offset: number = 0) {
   }
 }
 
-export async function getAdminAllIssues() {
+export async function getAdminAllIssues(filters?: { status?: string; riskLevel?: string }) {
   const db = await getDb();
   if (!db) return [];
   try {
-    const result = await db.select({
+    let query = db.select({
       id: issues.id,
       title: issues.title,
       description: issues.description,
@@ -230,8 +325,21 @@ export async function getAdminAllIssues() {
       userId: users.id,
       userName: users.name,
       userEmail: users.email,
-    }).from(issues).leftJoin(users, eq(issues.userId, users.id)).orderBy(issues.createdAt);
-    return result;
+    }).from(issues).leftJoin(users, eq(issues.userId, users.id));
+
+    const whereConditions = [];
+    if (filters?.status) {
+      whereConditions.push(eq(issues.status, filters.status as any));
+    }
+    if (filters?.riskLevel) {
+      whereConditions.push(eq(issues.riskLevel, filters.riskLevel as any));
+    }
+
+    if (whereConditions.length > 0) {
+      query = query.where(and(...whereConditions)) as any;
+    }
+
+    return await query.orderBy(desc(issues.createdAt));
   } catch (error) {
     console.error("[Database] Failed to get admin issues:", error);
     return [];
@@ -284,13 +392,17 @@ export async function createIssue(data: InsertIssue) {
       throw new Error(`User with ID ${data.userId} not found in database. Please try logging out and in again.`);
     }
 
-    const result = await db.insert(issues).values(data);
+    // Clean data: remove empty strings for optional fields to let defaults work
+    const cleanData: any = { ...data };
+    if (!cleanData.imageUrl) delete cleanData.imageUrl;
+
+    const result = await db.insert(issues).values(cleanData);
     const insertedId = result[0].insertId;
     return await getIssueById(Number(insertedId));
   } catch (error: any) {
     console.error("[Database] Failed to create issue:", error);
     // Extract a more useful message from the MySQL error if available
-    const mysqlError = error.sqlMessage || error.message || "Unknown database error";
+    const mysqlError = error.sqlMessage || error.message || JSON.stringify(error);
     throw new Error(`Database Error: ${mysqlError}`);
   }
 }
@@ -404,6 +516,91 @@ export async function getUserVotes(userId: number) {
 }
 
 // AI Risk Detection helpers
+export async function updateIssueStatus(issueId: number, status: "open" | "in-progress" | "resolved") {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    // 1. Update the issue status
+    await db.update(issues).set({ status, updatedAt: new Date() }).where(eq(issues.id, issueId));
+
+    // 2. Get the issue to find the reporter
+    const [issue] = await db.select().from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (issue) {
+      // 3. Create a notification for the reporter
+      const statusLabels = {
+        "open": "Open",
+        "in-progress": "In Progress",
+        "resolved": "Resolved"
+      };
+
+      await createNotification({
+        userId: issue.userId,
+        issueId: issue.id,
+        title: "Issue Status Updated",
+        message: `The status of your issue "${issue.title}" has been updated to ${statusLabels[status]}.`,
+        type: "status_change"
+      });
+    }
+
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to update issue status:", error);
+    return false;
+  }
+}
+
+export async function createNotification(notification: InsertNotification) {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [result] = await db.insert(notifications).values(notification);
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to create notification:", error);
+    return false;
+  }
+}
+
+export async function getNotifications(userId: number, limit: number = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    return await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(sql`${notifications.createdAt} DESC`)
+      .limit(limit);
+  } catch (error) {
+    console.error("[Database] Failed to get notifications:", error);
+    return [];
+  }
+}
+
+export async function markNotificationAsRead(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.update(notifications).set({ isRead: 1 }).where(eq(notifications.id, id));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to mark notification as read:", error);
+    return false;
+  }
+}
+
+export async function clearAllNotifications(userId: number) {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.delete(notifications).where(eq(notifications.userId, userId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to clear notifications:", error);
+    return false;
+  }
+}
+
 export async function updateIssueRiskLevel(id: number, riskLevel: "low" | "medium" | "high" | "critical") {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

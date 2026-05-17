@@ -11,15 +11,18 @@ import SubmitIssue from "./pages/SubmitIssue";
 import IssueDetail from "./pages/IssueDetail";
 import Dashboard from "./pages/Dashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminSettings from "./pages/AdminSettings";
 import SignUp from "./pages/SignUp";
 import SignIn from "./pages/SignIn";
 import Settings from "./pages/Settings";
+import ComponentShowcase from "./pages/ComponentShowcase";
+import ChatPage from "./pages/ChatPage";
 import Navbar from "./components/Navbar";
 import { useLocation } from "wouter";
 
 function Layout() {
   const [location] = useLocation();
-  const isAdminRoute = location.startsWith("/admin-dashboard");
+  const isAdminRoute = location.startsWith("/admin-dashboard") || location.startsWith("/admin/");
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -40,9 +43,12 @@ function Router() {
       <Route path={"/issues/:id"} component={IssueDetail} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/admin-dashboard"} component={AdminDashboard} />
+      <Route path={"/admin/settings"} component={AdminSettings} />
       <Route path={"/signup"} component={SignUp} />
       <Route path={"/signin"} component={SignIn} />
       <Route path={"/settings"} component={Settings} />
+      <Route path={"/chat"} component={ChatPage} />
+      <Route path={"/showcase"} component={ComponentShowcase} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

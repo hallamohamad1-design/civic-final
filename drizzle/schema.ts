@@ -33,7 +33,7 @@ export type InsertUser = typeof users.$inferInsert;
  * Issues table for civic issue reporting.
  * Stores community-reported infrastructure and civic issues with location data.
  */
-export const issues = mysqlTable("issues", {
+export const issues = mysqlTable("civic_issues_v2", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull().references(() => users.id),
   title: varchar("title", { length: 255 }).notNull(),
@@ -49,6 +49,14 @@ export const issues = mysqlTable("issues", {
   imageUrl: longtext("imageUrl"),
   upvotes: int("upvotes").default(0).notNull(),
   resolutionRating: int("resolutionRating"),
+  // AI analysis columns — populated by n8n / external AI pipeline
+  severityScore:         int("severity_score"),
+  aiSummary:             text("ai_summary"),
+  detectedHazards:       text("detected_hazards"),       // stored as JSON string
+  recommendedAction:     text("recommended_action"),
+  estimatedUrgencyHours: int("estimated_urgency_hours"),
+  aiConfidence:          text("ai_confidence"),           // high | medium | low
+  analysisTimestamp:     timestamp("analysis_timestamp"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -102,3 +110,20 @@ export const otpCodes = mysqlTable("otp_codes", {
 
 export type OtpCode = typeof otpCodes.$inferSelect;
 export type InsertOtpCode = typeof otpCodes.$inferInsert;
+
+/**
+ * Notifications table for tracking status updates and system alerts for users.
+ */
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  issueId: int("issueId").references(() => issues.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  type: varchar("type", { length: 64 }).default("info").notNull(), // info, status_change, etc.
+  isRead: int("isRead").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = typeof notifications.$inferInsert;
