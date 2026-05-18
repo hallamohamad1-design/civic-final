@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1776171713056,
+      "tag": "0000_great_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1776172003446,
+      "tag": "0001_damp_expediter",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1776175231983,
+      "tag": "0002_melodic_maverick",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1777156472407,
+      "tag": "0003_milky_dreadnoughts",
+      "breakpoints": true
+    }
+  ]
+}
