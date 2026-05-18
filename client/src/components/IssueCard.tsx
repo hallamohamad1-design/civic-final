@@ -35,9 +35,7 @@ export default function IssueCard({ issue, isSelected, onClick }: IssueCardProps
             <div className="flex items-center gap-1 text-xs text-slate-500 mb-2">
               <MapPin className="h-3 w-3" />
               <span className="line-clamp-1">
-                {issue.address?.includes("Location identified by") && issue.latitude && issue.longitude
-                  ? `${Number(issue.latitude).toFixed(6)}, ${Number(issue.longitude).toFixed(6)}`
-                  : issue.address}
+                {issue.address || `${Number(issue.latitude).toFixed(6)}, ${Number(issue.longitude).toFixed(6)}`}
               </span>
             </div>
             <div className="flex justify-between items-center">

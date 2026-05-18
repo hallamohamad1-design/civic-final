@@ -178,9 +178,7 @@ export default function IssueDetail() {
                   <MapPin className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="font-semibold text-slate-900">
-                      {issue.address?.includes("Location identified by") 
-                        ? `${Number(issue.latitude).toFixed(6)}, ${Number(issue.longitude).toFixed(6)}`
-                        : issue.address}
+                      {issue.address || `${Number(issue.latitude).toFixed(6)}, ${Number(issue.longitude).toFixed(6)}`}
                     </p>
                     <p className="text-sm text-slate-500 mt-1">
                       Coordinates: {issue.latitude}, {issue.longitude}
