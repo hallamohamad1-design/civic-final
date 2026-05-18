@@ -296,6 +296,42 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         try {
+          let finalAddress = input.address;
+          
+          // Auto reverse-geocode on backend if the address looks like coordinates or is generic
+          const isCoordinates = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(finalAddress.trim());
+          const isGeneric = finalAddress.includes("Unknown Location") || finalAddress.includes("Location identified by coordinates");
+          
+          if (isCoordinates || isGeneric || finalAddress.trim() === "") {
+            try {
+              const lat = parseFloat(input.latitude);
+              const lng = parseFloat(input.longitude);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                const response = await fetch(
+                  `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+                  {
+                    headers: {
+                      "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
+                      "Accept-Language": "en"
+                    },
+                    signal: controller.signal,
+                  }
+                );
+                clearTimeout(timeoutId);
+                if (response.ok) {
+                  const data = await response.json();
+                  if (data.display_name) {
+                    finalAddress = data.display_name.substring(0, 500);
+                  }
+                }
+              }
+            } catch (geocodeErr) {
+              console.error("[Backend Geocoding Error]", geocodeErr);
+            }
+          }
+
           // AI Duplicate Detection with Graceful Fallback
           let riskLevel: "low" | "medium" | "high" | "critical" = "medium";
           let isHidden = 0;
@@ -327,7 +363,7 @@ export const appRouter = router({
             description: input.description,
             category: input.category,
             severity: input.severity,
-            address: input.address,
+            address: finalAddress,
             latitude: input.latitude,
             longitude: input.longitude,
             imageUrl: input.imageUrl,
@@ -343,7 +379,7 @@ export const appRouter = router({
               user_email: ctx.user.email || "",
               description: input.description,
               image_url: input.imageUrl || "",
-              location: input.address,
+              location: finalAddress,
               timestamp: new Date().toISOString(),
             });
 
@@ -357,7 +393,7 @@ export const appRouter = router({
                 user_email:   ctx.user.email || "",
                 title:        input.title,
                 description:  input.description,
-                location:     input.address,
+                location:     finalAddress,
                 image_url:    input.imageUrl || "",
                 submitted_at: new Date().toISOString(),
               }),
