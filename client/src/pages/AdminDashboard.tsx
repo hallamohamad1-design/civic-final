@@ -124,6 +124,20 @@ export default function AdminDashboard() {
     refetchHidden();
   };
 
+  // ─── Cleanup: delete all except the two demo reports ─────────────
+  const deleteAllExceptMutation = trpc.admin.deleteAllExcept.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Deleted ${data.deleted} reports. Only the 2 demo reports remain.`);
+      handleSyncAll();
+    },
+    onError: (err) => toast.error(err.message || "Cleanup failed"),
+  });
+
+  const handleCleanup = () => {
+    if (!confirm("This will permanently delete ALL reports except 'broken road' and 'سواااقين التكاتك'. Continue?")) return;
+    deleteAllExceptMutation.mutate({ keepTitles: ["broken road", "سواااقين التكاتك"] });
+  };
+
   // ─── Chart Computations (derived from live issues) ────────────────
   const areaData = useMemo(() => {
     if (!issues || issues.length === 0) return [];
@@ -347,6 +361,16 @@ export default function AdminDashboard() {
             <Button variant="outline" className="bg-white dark:bg-slate-800" onClick={handleSyncAll} disabled={isSyncing}>
               {isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               {isSyncing ? t("settings.syncing") : t("admin.syncDb")}
+            </Button>
+
+            <Button
+              variant="outline"
+              className="bg-white border-red-200 text-red-600 hover:bg-red-50"
+              onClick={handleCleanup}
+              disabled={deleteAllExceptMutation.isPending}
+            >
+              {deleteAllExceptMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash className="mr-2 h-4 w-4" />}
+              {deleteAllExceptMutation.isPending ? "Cleaning..." : "Delete Test Reports"}
             </Button>
             
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>

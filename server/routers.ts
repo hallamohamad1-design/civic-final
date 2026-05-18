@@ -34,7 +34,7 @@ import {
   createNotification,
 } from "./db";
 import { issues, users } from "../drizzle/schema";
-import { eq, sql, and, gte } from "drizzle-orm";
+import { eq, sql, and, gte, notInArray } from "drizzle-orm";
 import { hashPassword, comparePasswords } from "./_core/password";
 import { 
   analyzeIssueRisk, 
@@ -566,6 +566,23 @@ export const appRouter = router({
       .input(z.object({ status: z.string().optional(), riskLevel: z.string().optional() }).optional())
       .query(async ({ input }) => {
         return await getAdminAllIssues(input);
+      }),
+
+    deleteAllExcept: adminProcedure
+      .input(z.object({ keepTitles: z.array(z.string()) }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB not available" });
+        // Find all issues NOT in the keep list
+        const toDelete = await db.select({ id: issues.id }).from(issues).where(
+          notInArray(issues.title, input.keepTitles)
+        );
+        const idsToDelete = toDelete.map((r: any) => r.id);
+        if (idsToDelete.length === 0) return { deleted: 0 };
+        for (const id of idsToDelete) {
+          await deleteIssue(id);
+        }
+        return { deleted: idsToDelete.length };
       }),
 
     getStats: adminProcedure.query(async () => {

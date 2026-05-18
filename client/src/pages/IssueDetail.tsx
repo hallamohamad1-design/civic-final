@@ -2,7 +2,7 @@ import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ThumbsUp, Calendar, User, AlertCircle, ArrowLeft, Star } from "lucide-react";
+import { MapPin, ThumbsUp, Calendar, AlertCircle, ArrowLeft, Star, Trash2, Pencil, X, Save } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { MapView } from "@/components/Map";
 import StatusBadge from "@/components/StatusBadge";
@@ -11,6 +11,8 @@ import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function IssueDetail() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +26,54 @@ export default function IssueDetail() {
   const { data: issue, isLoading, refetch } = trpc.issues.getById.useQuery(Number(id));
   const upvoteMutation = trpc.issues.upvote.useMutation();
   const rateMutation = trpc.issues.rateResolution.useMutation();
+  const deleteMutation = trpc.issues.delete.useMutation();
+  const updateMutation = trpc.issues.update.useMutation();
+
+  // Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editSeverity, setEditSeverity] = useState<"low" | "medium" | "high">("medium");
+
+  const openEdit = () => {
+    if (!issue) return;
+    setEditTitle(issue.title);
+    setEditDescription(issue.description);
+    setEditCategory(issue.category);
+    setEditSeverity(issue.severity as "low" | "medium" | "high");
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!issue) return;
+    try {
+      await updateMutation.mutateAsync({
+        id: issue.id,
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        category: editCategory,
+        severity: editSeverity,
+      });
+      toast.success("Report updated successfully");
+      setIsEditing(false);
+      refetch();
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to update report");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!issue) return;
+    if (!confirm("Are you sure you want to delete this report? This cannot be undone.")) return;
+    try {
+      await deleteMutation.mutateAsync(issue.id);
+      toast.success("Report deleted");
+      navigate("/map");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to delete report");
+    }
+  };
 
   const handleUpvote = async () => {
     if (!issue || hasUpvoted) return;
@@ -98,6 +148,79 @@ export default function IssueDetail() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+
+      {/* Edit Modal */}
+      {isEditing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <h2 className="text-xl font-bold text-slate-900">Edit Report</h2>
+              <button onClick={() => setIsEditing(false)} className="p-2 rounded-full hover:bg-slate-100 transition-colors">
+                <X className="h-5 w-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Title</label>
+                <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="rounded-xl" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Category</label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 h-10 px-3 text-sm bg-white"
+                >
+                  {["Roads", "Water", "Electricity", "Sanitation", "Other"].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Severity</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["low", "medium", "high"] as const).map((sev) => (
+                    <button
+                      key={sev}
+                      type="button"
+                      onClick={() => setEditSeverity(sev)}
+                      className={`py-2 rounded-xl font-bold text-xs border transition-all ${
+                        editSeverity === sev
+                          ? sev === "low" ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                            : sev === "medium" ? "bg-amber-50 border-amber-300 text-amber-700"
+                            : "bg-rose-50 border-rose-300 text-rose-700"
+                          : "bg-white border-slate-200 text-slate-400"
+                      }`}
+                    >
+                      {sev.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Description</label>
+                <Textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="rounded-xl min-h-[100px] resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 p-6 pt-0">
+              <Button variant="outline" onClick={() => setIsEditing(false)} className="flex-1">Cancel</Button>
+              <Button
+                onClick={handleSaveEdit}
+                disabled={updateMutation.isPending || !editTitle.trim()}
+                className="flex-1 gap-2 bg-blue-600 hover:bg-blue-700"
+              >
+                <Save className="h-4 w-4" />
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -123,14 +246,40 @@ export default function IssueDetail() {
                 </Badge>
               </div>
             </div>
-            <Button
-              onClick={handleUpvote}
-              disabled={hasUpvoted || upvoteMutation.isPending}
-              className="gap-2 whitespace-nowrap"
-            >
-              <ThumbsUp className="h-4 w-4" />
-              {t("detail.upvote")} ({issue.upvotes + (hasUpvoted ? 1 : 0)})
-            </Button>
+            <div className="flex flex-wrap gap-2 items-start">
+              {/* Owner actions */}
+              {user?.id === issue.userId && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openEdit}
+                    className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDelete}
+                    disabled={deleteMutation.isPending}
+                    className="gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                  </Button>
+                </>
+              )}
+              <Button
+                onClick={handleUpvote}
+                disabled={hasUpvoted || upvoteMutation.isPending}
+                className="gap-2 whitespace-nowrap"
+              >
+                <ThumbsUp className="h-4 w-4" />
+                {t("detail.upvote")} ({issue.upvotes + (hasUpvoted ? 1 : 0)})
+              </Button>
+            </div>
           </div>
         </div>
       </div>
