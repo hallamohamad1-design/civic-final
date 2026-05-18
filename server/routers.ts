@@ -656,30 +656,40 @@ export const appRouter = router({
     reverseGeocode: publicProcedure
       .input(z.object({ lat: z.number(), lng: z.number() }))
       .query(async ({ input }) => {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
         try {
-          // Use official Nominatim with proper User-Agent to avoid 403/429 limits
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
-            {
-              headers: {
-                "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
-                "Accept-Language": "en"
-              },
-              signal: controller.signal,
-            }
-          );
-          clearTimeout(timeoutId);
-          
-          if (!response.ok) throw new Error(`Geocoding service returned ${response.status}`);
-          const data = await response.json();
-          return { address: data.display_name || "Unknown Location" };
+          // Use Google Maps Geocoding API via the proxy — fast (~200ms)
+          const { makeRequest, GeocodingResult } = await import("./_core/map");
+          const data = await makeRequest<GeocodingResult>("/maps/api/geocode/json", {
+            latlng: `${input.lat},${input.lng}`,
+            language: "en",
+          });
+          if (data.status === "OK" && data.results.length > 0) {
+            return { address: data.results[0].formatted_address };
+          }
+          throw new Error(`Geocoding status: ${data.status}`);
         } catch (error: any) {
-          clearTimeout(timeoutId);
-          console.error("[Geocoding Error]", error.name === 'AbortError' ? 'Timeout' : error.message);
-          return { address: "Location identified by coordinates (Service busy)" };
+          // Fallback to Nominatim if Google fails
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${input.lat}&lon=${input.lng}&format=json`,
+              {
+                headers: {
+                  "User-Agent": "CivicPulse/1.0 (admincivicpulse123@gmail.com)",
+                  "Accept-Language": "en"
+                },
+                signal: controller.signal,
+              }
+            );
+            clearTimeout(timeoutId);
+            if (response.ok) {
+              const data = await response.json();
+              if (data.display_name) return { address: data.display_name };
+            }
+          } catch { /* ignore */ }
+          console.error("[Geocoding Error]", error.message);
+          return { address: "Unknown Location" };
         }
       }),
     forwardGeocode: publicProcedure

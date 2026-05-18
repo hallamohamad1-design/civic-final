@@ -140,30 +140,11 @@ export default function SubmitIssue() {
     setIsGeocoding(true);
     setAddress("Loading...");
     try {
-      // Call Nominatim directly from the client — faster, no server hop
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=en`,
-        { headers: { "User-Agent": "CivicPulse/1.0" } }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        if (data.display_name) {
-          setAddress(data.display_name);
-          return;
-        }
-      }
-      // Fallback to tRPC server if direct call fails
       const data = await utils.client.maps.reverseGeocode.query({ lat, lng });
       setAddress(data.address);
     } catch (error) {
       console.error("Geocoding error:", error);
-      // Last resort: try tRPC server
-      try {
-        const data = await utils.client.maps.reverseGeocode.query({ lat, lng });
-        setAddress(data.address);
-      } catch {
-        setAddress("Unknown Location");
-      }
+      setAddress("Unknown Location");
     } finally {
       setIsGeocoding(false);
     }
@@ -221,35 +202,14 @@ export default function SubmitIssue() {
     }
 
     try {
-      // If geocoding is still in progress, wait for it to finish (up to 5s)
+      // If still geocoding, wait briefly (Google Maps is fast so this rarely triggers)
       if (isGeocoding) {
-        toast.info("Waiting for address to load...");
-        await new Promise<void>((resolve) => {
-          const interval = setInterval(() => {
-            if (!isGeocoding) { clearInterval(interval); resolve(); }
-          }, 200);
-          setTimeout(() => { clearInterval(interval); resolve(); }, 5000);
-        });
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
       }
 
-      // If address still not resolved, do one final geocode attempt
-      let finalAddress = address;
-      if (!finalAddress || finalAddress === "Loading..." || finalAddress === "Unknown Location" || finalAddress.includes("Location identified by")) {
-        try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${selectedLocation.lat}&lon=${selectedLocation.lng}&format=json&accept-language=en`,
-            { headers: { "User-Agent": "CivicPulse/1.0" } }
-          );
-          if (response.ok) {
-            const data = await response.json();
-            if (data.display_name) finalAddress = data.display_name;
-          }
-        } catch { /* use fallback */ }
-      }
-
-      if (!finalAddress || finalAddress === "Loading...") {
-        finalAddress = `${selectedLocation.lat.toFixed(5)}, ${selectedLocation.lng.toFixed(5)}`;
-      }
+      const finalAddress = (!address || address === "Loading..." || address === "Unknown Location")
+        ? `${selectedLocation.lat.toFixed(5)}, ${selectedLocation.lng.toFixed(5)}`
+        : address;
 
       await createIssueMutation.mutateAsync({
         title: title.trim(),
