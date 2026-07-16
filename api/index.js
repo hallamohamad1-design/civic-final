@@ -3028,8 +3028,8 @@ app.use(
   })
 );
 
-// api/index.ts
-var index_default = app;
+// api/index-src.ts
+var index_src_default = app;
 export {
-  index_default as default
+  index_src_default as default
 };
