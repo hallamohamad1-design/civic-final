@@ -4,8 +4,13 @@ import path from "path";
 import fs from "fs";
 import { nanoid } from "nanoid";
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), "uploads");
+import os from "os";
+
+// Use OS temp directory in serverless environment (like Vercel) because process.cwd() is read-only.
+const uploadsDir = process.env.VERCEL
+  ? path.join(os.tmpdir(), "uploads")
+  : path.join(process.cwd(), "uploads");
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
