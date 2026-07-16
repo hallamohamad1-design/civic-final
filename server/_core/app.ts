@@ -85,4 +85,24 @@ app.use(
   })
 );
 
+// Global error handler — always returns JSON, never an empty body.
+// This is the safety net for "Unexpected end of JSON input" errors.
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error("[Express error]", err);
+    const status =
+      (err as { status?: number; statusCode?: number }).status ||
+      (err as { statusCode?: number }).statusCode ||
+      500;
+    res.status(status).json({
+      error: err.message || "Internal server error",
+    });
+  }
+);
+
 export { app };
