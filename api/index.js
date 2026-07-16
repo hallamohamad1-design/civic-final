@@ -3027,9 +3027,20 @@ app.use(
     createContext
   })
 );
+app.use(
+  (err, _req, res, _next) => {
+    console.error("[Express error]", err);
+    const status = err.status || err.statusCode || 500;
+    res.status(status).json({
+      error: err.message || "Internal server error"
+    });
+  }
+);
 
-// api/index-src.ts
-var index_src_default = app;
+// api/index.ts
+function handler(req, res) {
+  return app(req, res);
+}
 export {
-  index_src_default as default
+  handler as default
 };
