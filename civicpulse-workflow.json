@@ -1,0 +1,128 @@
+{
+  "name": "CivicPulse AI Issue Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "civicpulse",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Receive Issue",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert civil infrastructure analyst and AI triage agent for CivicPulse, a community issue-reporting platform.\\n\\n## Your Job\\nAnalyze the submitted civic issue — which includes a user text description and optionally a photo — and return a structured JSON object with your findings. You MUST respond with ONLY valid JSON. No preamble. No explanation. No markdown code fences.\\n\\n## Classification Categories\\nChoose exactly ONE from:\\n- \\\"Road Damage\\\" (potholes, cracks, collapsed surface, broken curb)\\n- \\\"Waste / Garbage\\\" (illegal dumping, overflowing bins, litter accumulation)\\n- \\\"Drainage / Flooding\\\" (blocked drains, standing water, flood risk)\\n- \\\"Street Lighting\\\" (broken lights, dark streets, damaged poles)\\n- \\\"Public Property Damage\\\" (broken benches, vandalism, damaged signs, graffiti)\\n- \\\"Sewage / Water Leak\\\" (pipe burst, sewage overflow, water main leak)\\n- \\\"Other\\\" (use only if none of the above apply — then describe in summary)\\n\\n## Severity Levels\\nAssign exactly ONE:\\n- \\\"Critical\\\" — immediate public safety risk, road impassable, sewage overflow\\n- \\\"High\\\" — significant hazard, likely to worsen quickly, affects many people\\n- \\\"Medium\\\" — moderate inconvenience, not immediately dangerous, should be fixed within a week\\n- \\\"Low\\\" — minor issue, aesthetic or low-impact, can be scheduled\\n\\n## Output Format\\nReturn ONLY this JSON structure — no other text:\\n{\\n  \\\"category\\\": \\\"<one of the categories above>\\\",\\n  \\\"severity\\\": \\\"<Critical | High | Medium | Low>\\\",\\n  \\\"confidence\\\": <0.0 to 1.0>,\\n  \\\"summary\\\": \\\"<2-3 sentences describing the problem>\\\",\\n  \\\"detected_cause\\\": \\\"<visible cause or null>\\\",\\n  \\\"estimated_affected_area\\\": \\\"<small / medium / large / unknown>\\\",\\n  \\\"recommended_action\\\": \\\"<specific actionable step for the municipal team>\\\",\\n  \\\"urgency_reason\\\": \\\"<one sentence explaining why this severity was assigned>\\\"\\n}\\n\\n## Rules\\n- Use the text description as the primary analysis source.\\n- NEVER invent details not stated in the description.\\n- If uncertain between two categories, pick the most likely one and reflect uncertainty in confidence score.\\n- recommended_action MUST be specific.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Issue #{{ $json.body.issue_id }} submitted by {{ $json.body.user_name }}.\\nDescription: {{ $json.body.description }}\\nLocation: {{ $json.body.location }}\\nTimestamp: {{ $json.body.timestamp }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "ai-node",
+      "name": "AI Issue Analyzer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "category", "value": "={{ JSON.parse($json.choices[0].message.content).category }}", "type": "string" },
+            { "id": "a2", "name": "severity", "value": "={{ JSON.parse($json.choices[0].message.content).severity }}", "type": "string" },
+            { "id": "a3", "name": "confidence", "value": "={{ JSON.parse($json.choices[0].message.content).confidence }}", "type": "number" },
+            { "id": "a4", "name": "summary", "value": "={{ JSON.parse($json.choices[0].message.content).summary }}", "type": "string" },
+            { "id": "a5", "name": "detected_cause", "value": "={{ JSON.parse($json.choices[0].message.content).detected_cause }}", "type": "string" },
+            { "id": "a6", "name": "recommended_action", "value": "={{ JSON.parse($json.choices[0].message.content).recommended_action }}", "type": "string" },
+            { "id": "a7", "name": "urgency_reason", "value": "={{ JSON.parse($json.choices[0].message.content).urgency_reason }}", "type": "string" },
+            { "id": "a8", "name": "issue_id", "value": "={{ $('Receive Issue').item.json.body.issue_id }}", "type": "string" },
+            { "id": "a9", "name": "user_name", "value": "={{ $('Receive Issue').item.json.body.user_name }}", "type": "string" },
+            { "id": "a10", "name": "user_email", "value": "={{ $('Receive Issue').item.json.body.user_email }}", "type": "string" },
+            { "id": "a11", "name": "description", "value": "={{ $('Receive Issue').item.json.body.description }}", "type": "string" },
+            { "id": "a12", "name": "location", "value": "={{ $('Receive Issue').item.json.body.location }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "parse-node",
+      "name": "Parse AI Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "toEmail": "admincivicpulse123@gmail.com",
+        "subject": "=[CivicPulse Alert] {{ $json.severity }} – {{ $json.category }} – Issue #{{ $json.issue_id }}",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f8f9fa; border-radius: 12px;\"><div style=\"background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 24px; border-radius: 12px 12px 0 0; text-align: center;\"><h1 style=\"color: #ffffff; margin: 0; font-size: 24px;\">🚨 CivicPulse Issue Alert</h1><p style=\"color: #a0aec0; margin: 8px 0 0;\">AI-Powered Civic Issue Analysis</p></div><div style=\"background: #ffffff; padding: 24px; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0;\"><div style=\"background: #fff5f5; border-left: 4px solid #fc8181; padding: 16px; border-radius: 8px; margin-bottom: 16px;\"><p style=\"margin: 0;\"><strong>🔴 Severity:</strong> <span style=\"color: #e53e3e; font-weight: bold;\">{{ $json.severity }}</span></p><p style=\"margin: 4px 0 0;\"><strong>📋 Category:</strong> {{ $json.category }}</p><p style=\"margin: 4px 0 0;\"><strong>🎯 Confidence:</strong> {{ $json.confidence }}</p></div><h3 style=\"color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;\">AI Analysis Summary</h3><p>{{ $json.summary }}</p><p><strong>🔍 Detected Cause:</strong> {{ $json.detected_cause }}</p><p><strong>⚡ Recommended Action:</strong> {{ $json.recommended_action }}</p><p><strong>⏰ Urgency Reason:</strong> {{ $json.urgency_reason }}</p><hr style=\"border: none; border-top: 1px solid #e2e8f0; margin: 16px 0;\"><h3 style=\"color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;\">Original Submission</h3><p><strong>👤 User:</strong> {{ $json.user_name }} ({{ $json.user_email }})</p><p><strong>📝 Description:</strong> {{ $json.description }}</p><p><strong>📍 Location:</strong> {{ $json.location }}</p><p><strong>🔢 Issue ID:</strong> #{{ $json.issue_id }}</p><div style=\"text-align: center; margin-top: 24px;\"><a href=\"https://civic-final-production.up.railway.app/admin\" style=\"display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; border-radius: 8px; font-weight: bold;\">Open Admin Dashboard</a></div></div></div>",
+        "options": {}
+      },
+      "id": "email-node",
+      "name": "Notify Admin",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [980, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"received\", \"issue_id\": \"{{ $('Receive Issue').item.json.body.issue_id }}\", \"message\": \"AI analysis complete\" }",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [{ "name": "Content-Type", "value": "application/json" }]
+          }
+        }
+      },
+      "id": "respond-node",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1240, 300]
+    }
+  ],
+  "connections": {
+    "Receive Issue": {
+      "main": [[{ "node": "AI Issue Analyzer", "type": "main", "index": 0 }]]
+    },
+    "AI Issue Analyzer": {
+      "main": [[{ "node": "Parse AI Result", "type": "main", "index": 0 }]]
+    },
+    "Parse AI Result": {
+      "main": [[{ "node": "Notify Admin", "type": "main", "index": 0 }]]
+    },
+    "Notify Admin": {
+      "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
